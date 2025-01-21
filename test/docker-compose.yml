@@ -114,6 +114,25 @@ services:
     command: >
       cdk-erigon --http.vhosts=* --http.corsdomain=* --ws --config=/usr/src/app/config.yaml
 
+  xlayer-recover:
+    container_name: xlayer-recover
+    image: cdk-erigon
+    environment:
+      - CDK_ERIGON_SEQUENCER=1
+    ports:
+      - 6059:6060
+      - 8119:8545
+      - 6899:6900
+      - 9089:9095
+    volumes:
+      - ./data/recover/:/home/erigon/data/
+      - ./config/test.erigon.seq.config.yaml:/usr/src/app/config.yaml
+      - ./config/dynamic-mynetwork-allocs.json:/usr/src/app/dynamic-mynetwork-allocs.json
+      - ./config/dynamic-mynetwork-chainspec.json:/usr/src/app/dynamic-mynetwork-chainspec.json
+      - ./config/dynamic-mynetwork-conf.json:/usr/src/app/dynamic-mynetwork-conf.json
+    command: >
+      cdk-erigon --zkevm.l1-sync-start-block=353 --zkevm.da-url=http://xlayer-da:8444 --http.vhosts=* --http.corsdomain=* --ws --config=/usr/src/app/config.yaml
+
   xlayer-rpc:
     container_name: xlayer-rpc
     image: cdk-erigon
