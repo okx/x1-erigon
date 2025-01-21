@@ -17,7 +17,7 @@ func Setup(address string, logger log.Logger) *http.ServeMux {
 	prometheus.DefaultRegisterer.MustRegister(defaultSet)
 
 	prometheusMux := http.NewServeMux()
-	prometheusMux.Handle("/debug/metrics/prometheus", promhttp.Handler())
+	prometheusMux.Handle("/metrics", promhttp.Handler())
 
 	promServer := &http.Server{
 		Addr:    address,
@@ -30,6 +30,6 @@ func Setup(address string, logger log.Logger) *http.ServeMux {
 		}
 	}()
 
-	logger.Info("Enabling metrics export to prometheus", "path", fmt.Sprintf("http://%s/debug/metrics/prometheus", address))
+	logger.Info("Enabling metrics export to prometheus", "path", fmt.Sprintf("http://%s/metrics", address))
 	return prometheusMux
 }
