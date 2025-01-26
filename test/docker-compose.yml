@@ -112,26 +112,59 @@ services:
       - ./config/dynamic-mynetwork-chainspec.json:/usr/src/app/dynamic-mynetwork-chainspec.json
       - ./config/dynamic-mynetwork-conf.json:/usr/src/app/dynamic-mynetwork-conf.json
     command: >
-      cdk-erigon --http.vhosts=* --http.corsdomain=* --ws --config=/usr/src/app/config.yaml
+      cdk-erigon --zkevm.l1-cache-enabled=true --http.vhosts=* --http.corsdomain=* --ws --config=/usr/src/app/config.yaml
 
-  xlayer-recover:
-    container_name: xlayer-recover
+  xlayer-seq-resequence:
+    container_name: xlayer-seq-resequence
     image: cdk-erigon
     environment:
       - CDK_ERIGON_SEQUENCER=1
     ports:
-      - 6059:6060
-      - 8119:8545
-      - 6899:6900
-      - 9089:9095
+      - 6060:6060
+      - 8123:8545
+      - 6900:6900
+      - 9092:9095
     volumes:
-      - ./data/recover/:/home/erigon/data/
+      - ./data/seq/:/home/erigon/data/
       - ./config/test.erigon.seq.config.yaml:/usr/src/app/config.yaml
       - ./config/dynamic-mynetwork-allocs.json:/usr/src/app/dynamic-mynetwork-allocs.json
       - ./config/dynamic-mynetwork-chainspec.json:/usr/src/app/dynamic-mynetwork-chainspec.json
       - ./config/dynamic-mynetwork-conf.json:/usr/src/app/dynamic-mynetwork-conf.json
     command: >
-      cdk-erigon --zkevm.l1-sync-start-block=353 --zkevm.da-url=http://xlayer-da:8444 --http.vhosts=* --http.corsdomain=* --ws --config=/usr/src/app/config.yaml
+      cdk-erigon --zkevm.l1-cache-enabled=true --zkevm.sequencer-resequence=true --http.vhosts=* --http.corsdomain=* --ws --config=/usr/src/app/config.yaml
+
+  xlayer-seq-recover:
+    container_name: xlayer-seq-recover
+    image: cdk-erigon
+    environment:
+      - CDK_ERIGON_SEQUENCER=1
+    ports:
+      - 6060:6060
+      - 8123:8545
+      - 6900:6900
+      - 9092:9095
+    volumes:
+      - ./data/seq/:/home/erigon/data/
+      - ./config/test.erigon.seq.config.yaml:/usr/src/app/config.yaml
+      - ./config/dynamic-mynetwork-allocs.json:/usr/src/app/dynamic-mynetwork-allocs.json
+      - ./config/dynamic-mynetwork-chainspec.json:/usr/src/app/dynamic-mynetwork-chainspec.json
+      - ./config/dynamic-mynetwork-conf.json:/usr/src/app/dynamic-mynetwork-conf.json
+    command: >
+      cdk-erigon --zkevm.l1-cache-enabled=true --zkevm.l1-sync-start-block=353 --zkevm.da-url=http://xlayer-da:8444 --http.vhosts=* --http.corsdomain=* --ws --config=/usr/src/app/config.yaml
+
+  xlayer-seq-unwind:
+    container_name: xlayer-seq-unwind
+    image: cdk-erigon
+    environment:
+      - CDK_ERIGON_SEQUENCER=1
+    volumes:
+      - ./data/seq/:/home/erigon/data/
+      - ./config/test.erigon.seq.config.yaml:/usr/src/app/config.yaml
+      - ./config/dynamic-mynetwork-allocs.json:/usr/src/app/dynamic-mynetwork-allocs.json
+      - ./config/dynamic-mynetwork-chainspec.json:/usr/src/app/dynamic-mynetwork-chainspec.json
+      - ./config/dynamic-mynetwork-conf.json:/usr/src/app/dynamic-mynetwork-conf.json
+    command: >
+      integration state_stages_zkevm --config=/usr/src/app/config.yaml --chain dynamic-mynetwork --datadir /home/erigon/data/ --unwind-batch-no=1
 
   xlayer-rpc:
     container_name: xlayer-rpc
@@ -151,6 +184,58 @@ services:
       - ./config/dynamic-mynetwork-conf.json:/usr/src/app/dynamic-mynetwork-conf.json
     command: >
       cdk-erigon --http.vhosts=* --http.corsdomain=* --ws --config=/usr/src/app/config.yaml
+
+  xlayer-lrp:
+    container_name: xlayer-lrp
+    image: cdk-erigon
+    environment:
+      - CDK_ERIGON_SEQUENCER=0
+    ports:
+      - 6062:6060
+      - 8126:8545
+      - 6902:6900
+      - 9093:9095
+    volumes:
+      - ./data/lrp/:/home/erigon/data/
+      - ./config/test.erigon.rpc.config.yaml:/usr/src/app/config.yaml
+      - ./config/dynamic-mynetwork-allocs.json:/usr/src/app/dynamic-mynetwork-allocs.json
+      - ./config/dynamic-mynetwork-chainspec.json:/usr/src/app/dynamic-mynetwork-chainspec.json
+      - ./config/dynamic-mynetwork-conf.json:/usr/src/app/dynamic-mynetwork-conf.json
+    command: >
+      cdk-erigon --http.vhosts=* --http.corsdomain=* --ws --config=/usr/src/app/config.yaml
+
+  xlayer-lrp-unwind:
+    container_name: xlayer-lrp-unwind
+    image: cdk-erigon
+    environment:
+      - CDK_ERIGON_SEQUENCER=0
+    volumes:
+      - ./data/lrp/:/home/erigon/data/
+      - ./config/test.erigon.rpc.config.yaml:/usr/src/app/config.yaml
+      - ./config/dynamic-mynetwork-allocs.json:/usr/src/app/dynamic-mynetwork-allocs.json
+      - ./config/dynamic-mynetwork-chainspec.json:/usr/src/app/dynamic-mynetwork-chainspec.json
+      - ./config/dynamic-mynetwork-conf.json:/usr/src/app/dynamic-mynetwork-conf.json
+    command: >
+      integration state_stages_zkevm --config=/usr/src/app/config.yaml --chain dynamic-mynetwork --datadir /home/erigon/data/ --unwind-batch-no=1
+
+  xlayer-lrp-resequence:
+    container_name: xlayer-lrp-resequence
+    image: cdk-erigon
+    environment:
+      - CDK_ERIGON_SEQUENCER=1
+    ports:
+      - 6062:6060
+      - 8126:8545
+      - 6902:6900
+      - 9093:9095
+    volumes:
+      - ./data/lrp/:/home/erigon/data/
+      - ./config/test.erigon.seq.config.yaml:/usr/src/app/config.yaml
+      - ./config/dynamic-mynetwork-allocs.json:/usr/src/app/dynamic-mynetwork-allocs.json
+      - ./config/dynamic-mynetwork-chainspec.json:/usr/src/app/dynamic-mynetwork-chainspec.json
+      - ./config/dynamic-mynetwork-conf.json:/usr/src/app/dynamic-mynetwork-conf.json
+    command: >
+      cdk-erigon --zkevm.l1-cache-enabled=true --zkevm.sequencer-resequence=true --http.vhosts=* --http.corsdomain=* --ws --config=/usr/src/app/config.yaml
 
   xlayer-mock-l1-network:
     container_name: xlayer-mock-l1-network

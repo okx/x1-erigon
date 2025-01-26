@@ -1,0 +1,123 @@
+version: "3.5"
+networks:
+  default:
+    name: erigon-lrp
+services:
+  # xlayer-lrp-sequence:
+  #   container_name: xlayer-lrp-sequence
+  #   image: cdk-erigon
+  #   environment:
+  #     - CDK_ERIGON_SEQUENCER=1
+  #   ports:
+  #     - 6062:6060
+  #     - 8126:8545
+  #     - 6902:6900
+  #     - 9093:9095
+  #   volumes:
+  #     - ./data/lrp/:/home/erigon/data/
+  #     - ./config/test.erigon.seq.config.yaml:/usr/src/app/config.yaml
+  #     - ./config/dynamic-mynetwork-allocs.json:/usr/src/app/dynamic-mynetwork-allocs.json
+  #     - ./config/dynamic-mynetwork-chainspec.json:/usr/src/app/dynamic-mynetwork-chainspec.json
+  #     - ./config/dynamic-mynetwork-conf.json:/usr/src/app/dynamic-mynetwork-conf.json
+  #   command: >
+  #     cdk-erigon --zkevm.l1-cache-enabled=true --http.vhosts=* --http.corsdomain=* --ws --config=/usr/src/app/config.yaml
+
+  xlayer-lrp:
+    container_name: xlayer-lrp
+    image: cdk-erigon
+    environment:
+      - CDK_ERIGON_SEQUENCER=0
+    ports:
+      - 6062:6060
+      - 8126:8545
+      - 6902:6900
+      - 9093:9095
+    volumes:
+      - ./data/lrp/:/home/erigon/data/
+      - ./config/test.erigon.rpc.config.yaml:/usr/src/app/config.yaml
+      - ./config/dynamic-mynetwork-allocs.json:/usr/src/app/dynamic-mynetwork-allocs.json
+      - ./config/dynamic-mynetwork-chainspec.json:/usr/src/app/dynamic-mynetwork-chainspec.json
+      - ./config/dynamic-mynetwork-conf.json:/usr/src/app/dynamic-mynetwork-conf.json
+    command: >
+      cdk-erigon --http.vhosts=* --http.corsdomain=* --ws --config=/usr/src/app/config.yaml
+
+  xlayer-lrp-unwind:
+    container_name: xlayer-lrp-unwind
+    image: cdk-erigon
+    environment:
+      - CDK_ERIGON_SEQUENCER=0
+    volumes:
+      - ./data/lrp/:/home/erigon/data/
+      - ./config/test.erigon.rpc.config.yaml:/usr/src/app/config.yaml
+      - ./config/dynamic-mynetwork-allocs.json:/usr/src/app/dynamic-mynetwork-allocs.json
+      - ./config/dynamic-mynetwork-chainspec.json:/usr/src/app/dynamic-mynetwork-chainspec.json
+      - ./config/dynamic-mynetwork-conf.json:/usr/src/app/dynamic-mynetwork-conf.json
+    command: |
+      integration state_stages_zkevm \
+        --config=/usr/src/app/config.yaml \
+        --chain dynamic-mynetwork \
+        --datadir /home/erigon/data/ \
+        --unwind-batch-no=10
+
+  xlayer-lrp-resequence:
+    container_name: xlayer-lrp-resequence
+    image: cdk-erigon
+    environment:
+      - CDK_ERIGON_SEQUENCER=1
+    ports:
+      - 6062:6060
+      - 8126:8545
+      - 6902:6900
+      - 9093:9095
+    volumes:
+      - ./data/lrp/:/home/erigon/data/
+      - ./config/test.erigon.seq.config.yaml:/usr/src/app/config.yaml
+      - ./config/dynamic-mynetwork-allocs.json:/usr/src/app/dynamic-mynetwork-allocs.json
+      - ./config/dynamic-mynetwork-chainspec.json:/usr/src/app/dynamic-mynetwork-chainspec.json
+      - ./config/dynamic-mynetwork-conf.json:/usr/src/app/dynamic-mynetwork-conf.json
+    command: >
+      cdk-erigon --zkevm.l1-cache-enabled=true --zkevm.sequencer-resequence=true --http.vhosts=* --http.corsdomain=* --ws --config=/usr/src/app/config.yaml
+
+  xlayer-executor:
+    container_name: xlayer-executor
+    image: hermeznetwork/zkevm-prover:v9.0.0-RC1-fork.13
+    platform: linux/amd64
+    environment:
+      - EXPERIMENTAL_DOCKER_DESKTOP_FORCE_QEMU=1
+    ports:
+      - 0.0.0.0:50061:50061 # MT
+      - 0.0.0.0:50071:50071 # Executor
+    volumes:
+      - ./config/test.stateless_executor.config.json:/usr/src/app/config.json
+    command: >
+      zkProver -c /usr/src/app/config.json
+
+  xlayer-mock-l1-network:
+    container_name: xlayer-mock-l1-network
+    image: zjg555543/geth:fork13-v0.0.3
+    ports:
+      - 8545:8545
+      - 8546:8546
+    command:
+      - "--http"
+      - "--http.api"
+      - "admin,eth,debug,miner,net,txpool,personal,web3"
+      - "--http.addr"
+      - "0.0.0.0"
+      - "--http.corsdomain"
+      - "*"
+      - "--http.vhosts"
+      - "*"
+      - "--ws"
+      - "--ws.origins"
+      - "*"
+      - "--ws.addr"
+      - "0.0.0.0"
+      - "--dev"
+      - "--dev.period"
+      - "1"
+      - "--datadir"
+      - "/geth_data"
+      - "--syncmode"
+      - "full"
+      - "--rpc.allow-unprotected-txs"
