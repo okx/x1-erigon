@@ -44,6 +44,7 @@ type Zk struct {
 	SequencerTimeoutOnEmptyTxPool          time.Duration
 	SequencerHaltOnBatchNumber             uint64
 	SequencerResequence                    bool
+	SequencerResequenceHaltOnBatchNumber   uint64
 	SequencerResequenceStrict              bool
 	SequencerResequenceReuseL1InfoIndex    bool
 	ExecutorUrls                           []string
@@ -94,7 +95,7 @@ type Zk struct {
 
 	// For X Layer
 	XLayer XLayerConfig
-	
+
 	InitialBatchCfgFile            string
 	ACLPrintHistory                int
 	InfoTreeUpdateInterval         time.Duration

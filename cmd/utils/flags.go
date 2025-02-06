@@ -581,6 +581,11 @@ var (
 		Usage: "When enabled, the sequencer will automatically resequence unseen batches stored in data stream",
 		Value: false,
 	}
+	SequencerResequenceHaltOnBatchNumber = cli.Uint64Flag{
+		Name:  "zkevm.sequencer-resequence-halt-on-batch-number",
+		Usage: "Halt the sequencer on this batch number when resequencing",
+		Value: 0,
+	}
 	SequencerResequenceStrict = cli.BoolFlag{
 		Name:  "zkevm.sequencer-resequence-strict",
 		Usage: "Strictly resequence the rolledback batches",

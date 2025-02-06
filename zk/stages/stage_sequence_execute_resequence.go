@@ -21,18 +21,32 @@ func resequence(
 		panic(fmt.Sprintf("[%s] The node need re-sequencing but this option is disabled.", s.LogPrefix()))
 	}
 
-	log.Info(fmt.Sprintf("[%s] Last batch %d is lower than highest batch in datastream %d, resequencing...", s.LogPrefix(), lastBatch, highestBatchInDs))
+	haltBatch := uint64(0)
+	if cfg.zk.SequencerResequenceHaltOnBatchNumber > 0 {
+		haltBatch = cfg.zk.SequencerResequenceHaltOnBatchNumber
+		if haltBatch <= lastBatch {
+			panic(fmt.Sprintf("[%s] The zkevm.sequencer-resequence-halt-on-batch-number is set lower than the last batch number.", s.LogPrefix()))
+		} else if haltBatch > highestBatchInDs {
+			panic(fmt.Sprintf("[%s] The zkevm.sequencer-resequence-halt-on-batch-number is set higher than the highest batch in datastream.", s.LogPrefix()))
+		}
+	} else {
+		haltBatch = highestBatchInDs
+	}
 
-	batches, err := cfg.dataStreamServer.ReadBatches(lastBatch+1, highestBatchInDs)
+	log.Info(fmt.Sprintf("[%s] Last batch %d is lower than highest batch in datastream %d, resequencing from batch %d to %d ...", s.LogPrefix(), lastBatch, highestBatchInDs, lastBatch+1, haltBatch))
+
+	batches, err := cfg.dataStreamServer.ReadBatches(lastBatch+1, haltBatch)
 	if err != nil {
 		return err
 	}
+
+	log.Info(fmt.Sprintf("[%s] Read %d batches from data stream", s.LogPrefix(), len(batches)))
 
 	if err = cfg.dataStreamServer.UnwindToBatchStart(lastBatch + 1); err != nil {
 		return err
 	}
 
-	log.Info(fmt.Sprintf("[%s] Resequence from batch %d to %d in data stream", s.LogPrefix(), lastBatch+1, highestBatchInDs))
+	log.Info(fmt.Sprintf("[%s] Resequence from batch %d to %d in data stream", s.LogPrefix(), lastBatch+1, haltBatch))
 	for _, batch := range batches {
 		batchJob := NewResequenceBatchJob(batch)
 		subBatchCount := 0

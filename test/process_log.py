@@ -10,7 +10,9 @@ def parse_time(line):
     # 假设时间戳在行的开头，格式为 [MM-DD|HH:MM:SS.SSS]
     match = re.search(r'\[(\d{2}-\d{2}\|\d{2}:\d{2}:\d{2}\.\d{3})\]', line)
     if match:
-        return datetime.strptime(match.group(1), '%m-%d|%H:%M:%S.%f')
+        current_year = datetime.now().year
+        parsed_time = datetime.strptime(match.group(1), '%m-%d|%H:%M:%S.%f')
+        return parsed_time.replace(year=current_year)
     return None
 
 def main(log_file):
@@ -29,10 +31,16 @@ def main(log_file):
 
         # 读取 lastBatch 和 highestBatchInDataStream
         last_batch = int(re.search(r'Last batch (\d+)', lines[0]).group(1))
-        highest_batch_in_data_stream = int(re.search(r'Highest batch in data stream (\d+)', lines[1]).group(1))
+        # highest_batch_in_data_stream = int(re.search(r'highest batch in datastream (\d+)', lines[0]).group(1))
+        halt_batch = int(re.search(r'resequencing from batch \d+ to (\d+)', lines[0]).group(1))
 
         # 计算需要读取的批次数量
-        batches_to_read = highest_batch_in_data_stream - last_batch
+        batches_to_read = halt_batch - last_batch
+
+        # 计算启动时间
+        first_line_time = parse_time(lines[0])
+        second_line_time = parse_time(lines[1])
+        startup_duration = (second_line_time - first_line_time).total_seconds()
 
         # 找到 startTime
         for i, line in enumerate(lines):
@@ -62,11 +70,14 @@ def main(log_file):
         duration = (end_time - start_time).total_seconds()
         tps = tx_count / duration if duration > 0 else 0
 
-        logging.info(f"{'Start Time:':<20} {start_time}")
-        logging.info(f"{'End Time:':<20} {end_time}")
-        logging.info(f"{'Total Transactions:':<20} {tx_count}")
-        logging.info(f"{'Duration:':<20} {duration} seconds")
-        logging.info(f"{'TPS:':<20} {tps}")
+        logging.info(f"{'From Batch:':<25} {last_batch+1}")
+        logging.info(f"{'To Batch:':<25} {halt_batch}")
+        logging.info(f"{'Startup Duration:':<25} {startup_duration} seconds")
+        logging.info(f"{'Start Time:':<25} {start_time}")
+        logging.info(f"{'End Time:':<25} {end_time}")
+        logging.info(f"{'Total Transactions:':<25} {tx_count}")
+        logging.info(f"{'Re-sequencing Duration:':<25} {duration} seconds")
+        logging.info(f"{'TPS:':<25} {tps}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Process log file to calculate TPS.')

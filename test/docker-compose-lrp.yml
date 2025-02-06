@@ -57,7 +57,7 @@ services:
         --config=/usr/src/app/config.yaml \
         --chain dynamic-mynetwork \
         --datadir /home/erigon/data/ \
-        --unwind-batch-no=10
+        --unwind-batch-no=1200
 
   xlayer-lrp-resequence:
     container_name: xlayer-lrp-resequence
@@ -76,7 +76,7 @@ services:
       - ./config/dynamic-mynetwork-chainspec.json:/usr/src/app/dynamic-mynetwork-chainspec.json
       - ./config/dynamic-mynetwork-conf.json:/usr/src/app/dynamic-mynetwork-conf.json
     command: >
-      cdk-erigon --zkevm.l1-cache-enabled=true --zkevm.sequencer-resequence=true --http.vhosts=* --http.corsdomain=* --ws --config=/usr/src/app/config.yaml
+      cdk-erigon --zkevm.l1-cache-enabled=true --zkevm.sequencer-resequence=true --zkevm.sequencer-resequence-halt-on-batch-number=1250 --http.vhosts=* --http.corsdomain=* --ws --config=/usr/src/app/config.yaml
 
   xlayer-executor:
     container_name: xlayer-executor
