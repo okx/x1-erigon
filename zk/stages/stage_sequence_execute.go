@@ -244,6 +244,7 @@ func sequencingBatchStep(
 		log.Info(fmt.Sprintf("[%s] Starting block %d (forkid %v)...", logPrefix, blockNumber, batchState.forkId))
 		logTicker.Reset(10 * time.Second)
 		blockTimer := time.NewTimer(cfg.zk.SequencerBlockSealTime)
+		ethBlockGasPool := new(core.GasPool).AddGas(transactionGasLimit) // used only in normalcy mode per block
 
 		if batchState.isL1Recovery() {
 			blockNumbersInBatchSoFar, err := batchContext.sdb.hermezDb.GetL2BlockNosByBatch(batchState.batchNumber)
@@ -449,7 +450,7 @@ func sequencingBatchStep(
 
 				// The copying of this structure is intentional
 				backupDataSizeChecker := *blockDataSizeChecker
-				receipt, execResult, txCounters, anyOverflow, err := attemptAddTransaction(cfg, sdb, ibs, batchCounters, &blockContext, header, transaction, effectiveGas, batchState.isL1Recovery(), batchState.forkId, l1TreeUpdateIndex, &backupDataSizeChecker)
+				receipt, execResult, txCounters, anyOverflow, err := attemptAddTransaction(cfg, sdb, ibs, batchCounters, &blockContext, header, transaction, effectiveGas, batchState.isL1Recovery(), batchState.forkId, l1TreeUpdateIndex, &backupDataSizeChecker, ethBlockGasPool)
 				if err != nil {
 					if batchState.isLimboRecovery() {
 						panic("limbo transaction has already been executed once so they must not fail while re-executing")

@@ -2,6 +2,7 @@ package stages
 
 import (
 	"context"
+	"errors"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -125,6 +126,7 @@ func attemptAddTransaction(
 	l1Recovery bool,
 	forkId, l1InfoIndex uint64,
 	blockDataSizeChecker *BlockDataChecker,
+	ethBlockGasPool *core.GasPool,
 ) (*types.Receipt, *core.ExecutionResult, *vm.TransactionCounter, overflowType, error) {
 	var batchDataOverflow, overflow bool
 	var err error
@@ -152,7 +154,13 @@ func attemptAddTransaction(
 		return nil, nil, txCounters, overflowCounters, nil
 	}
 
-	gasPool := new(core.GasPool).AddGas(transactionGasLimit)
+	// if not normalcy we want to create a gas pool per transaction (zkevm block gas limit is infinite), if normalcy create a pool per block.
+	var gasPool *core.GasPool
+	if !cfg.chainConfig.IsNormalcy(blockContext.BlockNumber) {
+		gasPool = new(core.GasPool).AddGas(transactionGasLimit)
+	} else {
+		gasPool = ethBlockGasPool
+	}
 
 	// set the counter collector on the config so that we can gather info during the execution
 	cfg.zkVmConfig.CounterCollector = txCounters.ExecutionCounters()
@@ -181,6 +189,10 @@ func attemptAddTransaction(
 	)
 
 	if err != nil {
+		if errors.Is(err, core.ErrGasLimitReached) {
+			log.Debug("Transaction gas limit reached", "txHash", transaction.Hash())
+			return nil, nil, txCounters, overflowGas, nil
+		}
 		return nil, nil, txCounters, overflowNone, err
 	}
 
