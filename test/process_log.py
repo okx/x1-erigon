@@ -72,7 +72,7 @@ def main(log_file):
 
         logging.info(f"{'From Batch:':<25} {last_batch+1}")
         logging.info(f"{'To Batch:':<25} {halt_batch}")
-        logging.info(f"{'Startup Duration:':<25} {startup_duration} seconds")
+        logging.info(f"{'Data Stream Startup:':<25} {startup_duration} seconds")
         logging.info(f"{'Start Time:':<25} {start_time}")
         logging.info(f"{'End Time:':<25} {end_time}")
         logging.info(f"{'Total Transactions:':<25} {tx_count}")

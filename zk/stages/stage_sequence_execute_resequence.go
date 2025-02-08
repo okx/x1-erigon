@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ledgerwatch/log/v3"
-
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
+	"github.com/ledgerwatch/erigon/zk/hermez_db"
+	"github.com/ledgerwatch/log/v3"
 )
 
 func resequence(
@@ -41,6 +41,38 @@ func resequence(
 	}
 
 	log.Info(fmt.Sprintf("[%s] Read %d batches from data stream", s.LogPrefix(), len(batches)))
+
+	tx, err := cfg.db.BeginRw(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// delete L1InfoTreeIndexesProgress
+	hermezDb := hermez_db.NewHermezDb(tx)
+
+	// 从第一个 batch 中获取起始区块号
+	if len(batches) == 0 {
+		return fmt.Errorf("no batches to process")
+	}
+	fromBlock := batches[0][0].L2BlockNumber
+
+	latestBlockNumber, _, err := hermezDb.GetLatestBlockL1InfoTreeIndexProgress()
+	if err != nil {
+		return fmt.Errorf("get latest block l1 info tree index progress error: %v", err)
+	}
+
+	// 使用实际的区块号范围进行删除
+	if err = hermezDb.DeleteBlockL1InfoTreeIndexesProgress(fromBlock, latestBlockNumber); err != nil {
+		return fmt.Errorf("truncate block l1 info tree index progress error: %v", err)
+	}
+
+	// commit
+	if err = tx.Commit(); err != nil {
+		return err
+	}
+
+	log.Info(fmt.Sprintf("[%s] Deleted L1InfoTreeIndexesProgress from block %d to %d", s.LogPrefix(), fromBlock, latestBlockNumber))
 
 	if err = cfg.dataStreamServer.UnwindToBatchStart(lastBatch + 1); err != nil {
 		return err

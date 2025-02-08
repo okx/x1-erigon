@@ -38,7 +38,7 @@ services:
         --config=/usr/src/app/config.yaml \
         --chain dynamic-mynetwork \
         --datadir /home/erigon/data/ \
-        --unwind-batch-no=136800
+        --unwind-batch-no=136799
 
   xlayer-lrp-resequence:
     container_name: xlayer-lrp-resequence
@@ -72,7 +72,7 @@ services:
         --config=/usr/src/app/config.yaml \
         --chain xlayer-mainnet \
         --datadir /home/erigon/data/ \
-        --unwind-batch-no=136800
+        --unwind-batch-no=136799
 
   xlayer-mainnet-lrp-resequence:
     container_name: xlayer-mainnet-lrp-resequence
