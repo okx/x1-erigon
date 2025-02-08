@@ -44,7 +44,7 @@ def main(log_file):
 
         # 找到 startTime
         for i, line in enumerate(lines):
-            if f"Read {batches_to_read} batches from data stream" in line:
+            if "Resequence from batch" in line and "in data stream" in line:
                 start_time = parse_time(line)
                 break
 
