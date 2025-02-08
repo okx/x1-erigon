@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/0xPolygonHermez/zkevm-data-streamer/datastreamer"
@@ -711,6 +712,89 @@ LOOP_ENTRIES:
 		default:
 			continue
 		}
+	}
+
+	return batches, nil
+}
+
+func (srv *ZkEVMDataStreamServer) ReadBatchesWithConcurrency(start uint64, end uint64) ([][]*types.FullL2Block, error) {
+	batches := make([][]*types.FullL2Block, end-start+1)
+
+	batchPositions := make([]uint64, end-start+1)
+	var wg sync.WaitGroup
+	errCh := make(chan error, end-start+1)
+
+	for i := start; i <= end; i++ {
+		wg.Add(1)
+		go func(batchNum uint64) {
+			defer wg.Done()
+			bookmark := types.NewBookmarkProto(batchNum, datastream.BookmarkType_BOOKMARK_TYPE_BATCH)
+			marshalled, err := bookmark.Marshal()
+			if err != nil {
+				errCh <- err
+				return
+			}
+			pos, err := srv.streamServer.GetBookmark(marshalled)
+			if err != nil {
+				errCh <- err
+				return
+			}
+			batchPositions[batchNum-start] = pos
+		}(i)
+	}
+	wg.Wait()
+
+	select {
+	case err := <-errCh:
+		return nil, err
+	default:
+	}
+
+	wg = sync.WaitGroup{}
+	for i := start; i <= end; i++ {
+		wg.Add(1)
+		go func(batchNum uint64) {
+			defer wg.Done()
+
+			iterator := newDataStreamServerIterator(srv.streamServer, batchPositions[batchNum-start])
+			blocks := []*types.FullL2Block{}
+		LOOP_ENTRIES:
+			for {
+				parsedProto, _, err := client.ReadParsedProto(iterator)
+				if err != nil {
+					errCh <- err
+					return
+				}
+
+				if parsedProto == nil {
+					break
+				}
+
+				switch parsedProto := parsedProto.(type) {
+				case *types.BatchStart:
+					continue
+				case *types.BatchEnd:
+					if parsedProto.Number == batchNum {
+						break LOOP_ENTRIES
+					}
+				case *types.FullL2Block:
+					if parsedProto.BatchNumber == batchNum {
+						blocks = append(blocks, parsedProto)
+					}
+				default:
+					continue
+				}
+			}
+
+			batches[batchNum-start] = blocks
+		}(i)
+	}
+	wg.Wait()
+
+	select {
+	case err := <-errCh:
+		return nil, err
+	default:
 	}
 
 	return batches, nil

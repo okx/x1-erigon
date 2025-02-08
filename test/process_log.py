@@ -34,9 +34,6 @@ def main(log_file):
         # highest_batch_in_data_stream = int(re.search(r'highest batch in datastream (\d+)', lines[0]).group(1))
         halt_batch = int(re.search(r'resequencing from batch \d+ to (\d+)', lines[0]).group(1))
 
-        # 计算需要读取的批次数量
-        batches_to_read = halt_batch - last_batch
-
         # 计算启动时间
         first_line_time = parse_time(lines[0])
         second_line_time = parse_time(lines[1])

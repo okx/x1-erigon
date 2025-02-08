@@ -35,7 +35,7 @@ func resequence(
 
 	log.Info(fmt.Sprintf("[%s] Last batch %d is lower than highest batch in datastream %d, resequencing from batch %d to %d ...", s.LogPrefix(), lastBatch, highestBatchInDs, lastBatch+1, haltBatch))
 
-	batches, err := cfg.dataStreamServer.ReadBatches(lastBatch+1, haltBatch)
+	batches, err := cfg.dataStreamServer.ReadBatchesWithConcurrency(lastBatch+1, haltBatch)
 	if err != nil {
 		return err
 	}
