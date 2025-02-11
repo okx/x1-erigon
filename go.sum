@@ -820,8 +820,8 @@ github.com/nxadm/tail v1.4.4/go.mod h1:kenIhsEOeOJmVchQTgglprH7qJGnHDVpk1VPCcaMI
 github.com/nxadm/tail v1.4.8/go.mod h1:+ncqLTQzXmGhMZNUePPaPqPvBxHAIsmXswZKocGu+AU=
 github.com/nxadm/tail v1.4.9-0.20211216163028-4472660a31a6 h1:iZ5rEHU561k2tdi/atkIsrP5/3AX3BjyhYtC96nJ260=
 github.com/nxadm/tail v1.4.9-0.20211216163028-4472660a31a6/go.mod h1:A+9rV4WFp4DKg1Ym1v6YtCrJ2vvlt1ZA/iml0CNuu2A=
-github.com/okx/poseidongold v0.0.1 h1:C4iUIHj7hwfDLUUkC5xkXX5U3/V+9VWCzVDbaM62CGg=
-github.com/okx/poseidongold v0.0.1/go.mod h1:CsDc/ug8YFQzqPTho4pHFHI97cnJgFAgfPSLToRDQPU=
+github.com/okx/poseidongold v0.0.2 h1:HDyZdfqZMi8Vy7+583Ch1gMPPFtVHR4gozKEz0j2B+M=
+github.com/okx/poseidongold v0.0.2/go.mod h1:5ZSHtmCUvyWfMhQH+9wi6b41z4JJwgO06baYZdBPRXw=
 github.com/onsi/ginkgo v1.6.0/go.mod h1:lLunBs/Ym6LB5Z9jYTR76FiuTmxDTDusOGeTQH+WWjE=
 github.com/onsi/ginkgo v1.7.0/go.mod h1:lLunBs/Ym6LB5Z9jYTR76FiuTmxDTDusOGeTQH+WWjE=
 github.com/onsi/ginkgo v1.12.1/go.mod h1:zj2OWP4+oCPe1qIXoGWkgMRwljMUYCdkwsT2108oapk=
