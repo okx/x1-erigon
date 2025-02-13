@@ -55,7 +55,7 @@ def main(log_file):
                 match = re.search(r'Finish block \d+ with (\d+) transactions', line)
                 if match:
                     tx_count += int(match.group(1))
-            if "Resequencing completed." in line:
+            if "Resequencing completed." in line or "[EROR]" in line:
                 end_time = parse_time(line)
                 break
 

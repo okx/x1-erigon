@@ -88,7 +88,7 @@ services:
       - ./mainnet/seq:/home/erigon/data/
       - ./config/xlayerconfig-mainnet.yaml:/usr/src/app/config.yaml
     command: >
-      cdk-erigon --zkevm.sequencer-resequence=true --zkevm.sequencer-resequence-halt-on-batch-number=136911 --http.vhosts=* --http.corsdomain=* --ws --config=/usr/src/app/config.yaml
+      cdk-erigon --zkevm.sequencer-resequence=true --zkevm.sequencer-resequence-halt-on-batch-number=134525 --http.vhosts=* --http.corsdomain=* --ws --config=/usr/src/app/config.yaml
 
   xlayer-executor:
     container_name: xlayer-executor
