@@ -51,7 +51,7 @@ func resequence(
 	// delete L1InfoTreeIndexesProgress
 	hermezDb := hermez_db.NewHermezDb(tx)
 
-	// 从第一个 batch 中获取起始区块号
+	// get the start block number from the first batch
 	if len(batches) == 0 {
 		return fmt.Errorf("no batches to process")
 	}
@@ -62,7 +62,7 @@ func resequence(
 		return fmt.Errorf("get latest block l1 info tree index progress error: %v", err)
 	}
 
-	// 使用实际的区块号范围进行删除
+	// prune l1infotree indexes to unwinding point
 	if err = hermezDb.DeleteBlockL1InfoTreeIndexesProgress(fromBlock, latestBlockNumber); err != nil {
 		return fmt.Errorf("truncate block l1 info tree index progress error: %v", err)
 	}
