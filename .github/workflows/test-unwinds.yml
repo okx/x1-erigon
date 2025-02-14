@@ -5,6 +5,7 @@ on:
       - dev
       - zkevm
       - zkevm-2.60
+      - stable/**
   workflow_dispatch:
 
 jobs:

@@ -2,6 +2,7 @@ package stages
 
 import (
 	"context"
+	"errors"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -17,13 +18,9 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/zk/utils"
 	"github.com/ledgerwatch/log/v3"
-	"github.com/ledgerwatch/secp256k1"
 )
 
 func getNextPoolTransactions(ctx context.Context, cfg SequenceBlockCfg, executionAt, forkId uint64, alreadyYielded mapset.Set[[32]byte]) ([]types.Transaction, []common.Hash, bool, error) {
-	cfg.txPool.LockFlusher()
-	defer cfg.txPool.UnlockFlusher()
-
 	var ids []common.Hash
 	var transactions []types.Transaction
 	var allConditionsOk bool
@@ -57,9 +54,6 @@ func getNextPoolTransactions(ctx context.Context, cfg SequenceBlockCfg, executio
 }
 
 func getLimboTransaction(ctx context.Context, cfg SequenceBlockCfg, txHash *common.Hash, executionAt uint64) ([]types.Transaction, error) {
-	cfg.txPool.LockFlusher()
-	defer cfg.txPool.UnlockFlusher()
-
 	var transactions []types.Transaction
 	// ensure we don't spin forever looking for transactions, attempt for a while then exit up to the caller
 	if err := cfg.txPoolDb.View(ctx, func(poolTx kv.Tx) error {
@@ -89,8 +83,7 @@ func extractTransactionsFromSlot(slot *types2.TxsRlp, currentHeight uint64, cfg 
 	ids := make([]common.Hash, 0, len(slot.TxIds))
 	transactions := make([]types.Transaction, 0, len(slot.Txs))
 	toRemove := make([]common.Hash, 0)
-	signer := types.MakeSigner(cfg.chainConfig, currentHeight, 0)
-	cryptoContext := secp256k1.ContextForThread(1)
+
 	for idx, txBytes := range slot.Txs {
 		transaction, err := types.DecodeTransaction(txBytes)
 		if err == io.EOF {
@@ -106,17 +99,7 @@ func extractTransactionsFromSlot(slot *types2.TxsRlp, currentHeight uint64, cfg 
 			continue
 		}
 
-		// now attempt to recover the sender
-		sender, err := signer.SenderWithContext(cryptoContext, transaction)
-		if err != nil {
-			log.Warn("[extractTransaction] Failed to recover sender from transaction, skipping and removing from pool",
-				"error", err,
-				"hash", transaction.Hash())
-			toRemove = append(toRemove, slot.TxIds[idx])
-			continue
-		}
-
-		transaction.SetSender(sender)
+		// Recover sender later only for those transactions that are included in the block
 		transactions = append(transactions, transaction)
 		ids = append(ids, slot.TxIds[idx])
 	}
@@ -143,7 +126,8 @@ func attemptAddTransaction(
 	l1Recovery bool,
 	forkId, l1InfoIndex uint64,
 	blockDataSizeChecker *BlockDataChecker,
-) (*types.Receipt, *core.ExecutionResult, overflowType, error) {
+	ethBlockGasPool *core.GasPool,
+) (*types.Receipt, *core.ExecutionResult, *vm.TransactionCounter, overflowType, error) {
 	var batchDataOverflow, overflow bool
 	var err error
 
@@ -154,7 +138,7 @@ func attemptAddTransaction(
 	if blockDataSizeChecker != nil {
 		txL2Data, err := txCounters.GetL2DataCache()
 		if err != nil {
-			return nil, nil, overflowNone, err
+			return nil, nil, txCounters, overflowNone, err
 		}
 		batchDataOverflow = blockDataSizeChecker.AddTransactionData(txL2Data)
 		if batchDataOverflow {
@@ -162,15 +146,21 @@ func attemptAddTransaction(
 		}
 	}
 	if err != nil {
-		return nil, nil, overflowNone, err
+		return nil, nil, txCounters, overflowNone, err
 	}
 	anyOverflow := overflow || batchDataOverflow
 	if anyOverflow && !l1Recovery {
 		log.Debug("Transaction preexecute overflow detected", "txHash", transaction.Hash(), "counters", batchCounters.CombineCollectorsNoChanges().UsedAsString())
-		return nil, nil, overflowCounters, nil
+		return nil, nil, txCounters, overflowCounters, nil
 	}
 
-	gasPool := new(core.GasPool).AddGas(transactionGasLimit)
+	// if not normalcy we want to create a gas pool per transaction (zkevm block gas limit is infinite), if normalcy create a pool per block.
+	var gasPool *core.GasPool
+	if !cfg.chainConfig.IsNormalcy(blockContext.BlockNumber) {
+		gasPool = new(core.GasPool).AddGas(transactionGasLimit)
+	} else {
+		gasPool = ethBlockGasPool
+	}
 
 	// set the counter collector on the config so that we can gather info during the execution
 	cfg.zkVmConfig.CounterCollector = txCounters.ExecutionCounters()
@@ -199,29 +189,33 @@ func attemptAddTransaction(
 	)
 
 	if err != nil {
-		return nil, nil, overflowNone, err
+		if errors.Is(err, core.ErrGasLimitReached) {
+			log.Debug("Transaction gas limit reached", "txHash", transaction.Hash())
+			return nil, nil, txCounters, overflowGas, nil
+		}
+		return nil, nil, txCounters, overflowNone, err
 	}
 
 	if err = txCounters.ProcessTx(ibs, execResult.ReturnData); err != nil {
-		return nil, nil, overflowNone, err
+		return nil, nil, txCounters, overflowNone, err
 	}
 
 	batchCounters.UpdateExecutionAndProcessingCountersCache(txCounters)
 	// now that we have executed we can check again for an overflow
 	if overflow, err = batchCounters.CheckForOverflow(l1InfoIndex != 0); err != nil {
-		return nil, nil, overflowNone, err
+		return nil, nil, txCounters, overflowNone, err
 	}
 
 	counters := batchCounters.CombineCollectorsNoChanges().UsedAsString()
 	if overflow {
 		log.Debug("Transaction overflow detected", "txHash", transaction.Hash(), "coutners", counters)
 		ibs.RevertToSnapshot(snapshot)
-		return nil, nil, overflowCounters, nil
+		return nil, nil, txCounters, overflowCounters, nil
 	}
 	if gasUsed > header.GasLimit {
 		log.Debug("Transaction overflows block gas limit", "txHash", transaction.Hash(), "txGas", receipt.GasUsed, "blockGasUsed", header.GasUsed)
 		ibs.RevertToSnapshot(snapshot)
-		return nil, nil, overflowGas, nil
+		return nil, nil, txCounters, overflowGas, nil
 	}
 	log.Debug("Transaction added", "txHash", transaction.Hash(), "coutners", counters)
 
@@ -231,10 +225,10 @@ func attemptAddTransaction(
 	// we need to keep hold of the effective percentage used
 	// todo [zkevm] for now we're hard coding to the max value but we need to calc this properly
 	if err = sdb.hermezDb.WriteEffectiveGasPricePercentage(transaction.Hash(), effectiveGasPrice); err != nil {
-		return nil, nil, overflowNone, err
+		return nil, nil, txCounters, overflowNone, err
 	}
 
 	ibs.FinalizeTx(evm.ChainRules(), noop)
 
-	return receipt, execResult, overflowNone, nil
+	return receipt, execResult, txCounters, overflowNone, nil
 }
