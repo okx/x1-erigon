@@ -93,7 +93,7 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 				if dGp != nil {
 					newGpBig = newGpBig.Mul(dGp, big.NewInt(int64(gpMul)))
 				}
-				log.Debug(fmt.Sprintf("Free tx: nonce:%d, type %d. dGp:%v, factor:%d, newGp:%d", mt.Tx.Nonce, freeType, dGp, gpMul, newGpBig))
+				//log.Debug(fmt.Sprintf("Free tx: nonce:%d, type %d. dGp:%v, factor:%d, newGp:%d", mt.Tx.Nonce, freeType, dGp, gpMul, newGpBig))
 			}
 
 			mt.minTip = newGpBig.Uint64()
