@@ -339,6 +339,7 @@ func sequencingBatchStep(
 
 		innerBreak := false
 		emptyBlockOverflow := false
+		stateRootBeforeResequence := common.Hash{}
 		sendersToTriggerStatechanges := make(map[common.Address]struct{})
 		processingTxTime := time.Now()
 	OuterLoopTransactions:
@@ -396,6 +397,7 @@ func sequencingBatchStep(
 				if err != nil {
 					return err
 				}
+				stateRootBeforeResequence = batchState.resequenceBatchJob.CurrentBlock().StateRoot
 			} else if !batchState.isL1Recovery() {
 
 				var allConditionsOK bool
@@ -755,6 +757,19 @@ func sequencingBatchStep(
 			return err
 		}
 		cfg.legacyVerifier.StartAsyncVerification(batchContext.s.LogPrefix(), batchState.forkId, batchState.batchNumber, block.Root(), counters.UsedAsMap(), batchState.builtBlocks, useExecutorForVerification, batchContext.cfg.zk.SequencerBatchVerificationTimeout, batchContext.cfg.zk.SequencerBatchVerificationRetries)
+
+		if batchState.isResequence() {
+			if stateRootBeforeResequence != block.Root() {
+				err := fmt.Errorf("[%s] State root mismatch of block %d after resequencing, expected %s, got %s",
+					logPrefix,
+					blockNumber,
+					stateRootBeforeResequence.Hex(),
+					block.Root().Hex(),
+				)
+				log.Error(err.Error())
+				return err
+			}
+		}
 
 		// check for new responses from the verifier
 		needsUnwind, err := updateStreamAndCheckRollback(batchContext, batchState, streamWriter, u)
