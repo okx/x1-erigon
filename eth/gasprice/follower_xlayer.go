@@ -59,7 +59,7 @@ func (f *FollowerGasPrice) UpdateGasPriceAvg(l1GasPrice *big.Int) {
 	res.Int(result)
 	minGasPrice := new(big.Int).Set(f.cfg.Default)
 	if minGasPrice.Cmp(result) == 1 { // minGasPrice > result
-		log.Warn(fmt.Sprintf("Follower mode, setting DefaultGasPrice for L2: %s, result:%v", f.cfg.Default.String(), result.String()))
+		log.Info(fmt.Sprintf("Follower mode, setting DefaultGasPrice for L2: %s, result:%v", f.cfg.Default.String(), result.String()))
 		result = minGasPrice
 	}
 	maxGasPrice := new(big.Int).Set(f.cfg.MaxPrice)

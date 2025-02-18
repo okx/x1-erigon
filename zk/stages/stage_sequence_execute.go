@@ -70,9 +70,13 @@ func sequencingBatchStep(
 	historyCfg stagedsync.HistoryCfg,
 	resequenceBatchJob *ResequenceBatchJob,
 ) (err error) {
+	startSequenceTime := time.Now()
 	logPrefix := s.LogPrefix()
 	log.Info(fmt.Sprintf("[%s] Starting sequencing stage", logPrefix))
-	defer log.Info(fmt.Sprintf("[%s] Finished sequencing stage", logPrefix))
+	defer func() {
+		metrics.GetLogStatistics().CumulativeTiming(metrics.SequencingBatchTiming, time.Since(startSequenceTime))
+		log.Info(fmt.Sprintf("[%s] Finished sequencing stage", logPrefix))
+	}()
 
 	// For X Layer metrics
 	log.Info("[PoolTxCount] Starting Getting Pending Tx Count")
@@ -336,7 +340,7 @@ func sequencingBatchStep(
 		innerBreak := false
 		emptyBlockOverflow := false
 		sendersToTriggerStatechanges := make(map[common.Address]struct{})
-
+		processingTxTime := time.Now()
 	OuterLoopTransactions:
 		for {
 			if innerBreak {
@@ -397,11 +401,13 @@ func sequencingBatchStep(
 				var allConditionsOK bool
 				var newTransactions []types.Transaction
 				var newIds []common.Hash
-
+				getTxTime := time.Now()
 				newTransactions, newIds, allConditionsOK, err = getNextPoolTransactions(ctx, cfg, executionAt, batchState.forkId, batchState.yieldedTransactions)
 				if err != nil {
 					return err
 				}
+
+				metrics.GetLogStatistics().CumulativeTiming(metrics.GetTxTiming, time.Since(getTxTime))
 
 				batchState.blockState.transactionsForInclusion = append(batchState.blockState.transactionsForInclusion, newTransactions...)
 				for idx, tx := range newTransactions {
@@ -409,18 +415,24 @@ func sequencingBatchStep(
 				}
 
 				if len(batchState.blockState.transactionsForInclusion) == 0 {
+					pauseTime := time.Now()
 					if allConditionsOK {
 						time.Sleep(batchContext.cfg.zk.SequencerTimeoutOnEmptyTxPool)
 					} else {
 						time.Sleep(batchContext.cfg.zk.SequencerTimeoutOnEmptyTxPool / 5) // we do not need to sleep too long for txpool not ready
 					}
+					metrics.GetLogStatistics().CumulativeCounting(metrics.GetTxPauseCounter)
+					metrics.GetLogStatistics().CumulativeTiming(metrics.GetTxPauseTiming, time.Since(pauseTime))
 				} else {
 					log.Trace(fmt.Sprintf("[%s] Yielded transactions from the pool", logPrefix), "txCount", len(batchState.blockState.transactionsForInclusion))
 				}
 			}
 
 			if len(batchState.blockState.transactionsForInclusion) == 0 {
+				pauseTime := time.Now()
 				time.Sleep(batchContext.cfg.zk.SequencerTimeoutOnEmptyTxPool)
+				metrics.GetLogStatistics().CumulativeCounting(metrics.GetTxPauseCounter)
+				metrics.GetLogStatistics().CumulativeTiming(metrics.GetTxPauseTiming, time.Since(pauseTime))
 			} else {
 				log.Trace(fmt.Sprintf("[%s] Yielded transactions from the pool", logPrefix), "txCount", len(batchState.blockState.transactionsForInclusion))
 			}
@@ -469,6 +481,7 @@ func sequencingBatchStep(
 				backupDataSizeChecker := *blockDataSizeChecker
 				receipt, execResult, txCounters, anyOverflow, err := attemptAddTransaction(cfg, sdb, ibs, batchCounters, &blockContext, header, transaction, effectiveGas, batchState.isL1Recovery(), batchState.forkId, l1TreeUpdateIndex, &backupDataSizeChecker, ethBlockGasPool)
 				if err != nil {
+					metrics.GetLogStatistics().CumulativeCounting(metrics.ProcessingInvalidTxCounter)
 					if batchState.isLimboRecovery() {
 						panic("limbo transaction has already been executed once so they must not fail while re-executing")
 					}
@@ -516,6 +529,7 @@ func sequencingBatchStep(
 
 				switch anyOverflow {
 				case overflowCounters:
+					metrics.GetLogStatistics().CumulativeCounting(metrics.ZKOverflowBlockCounter)
 					if batchState.isLimboRecovery() {
 						panic("limbo transaction has already been executed once so they must not overflow counters while re-executing")
 					}
@@ -583,6 +597,7 @@ func sequencingBatchStep(
 						return fmt.Errorf("strict mode enabled, but resequenced batch %d overflowed counters on block %d", batchState.batchNumber, blockNumber)
 					}
 				case overflowGas:
+					metrics.GetLogStatistics().CumulativeCounting(metrics.FailTxGasOverCounter)
 					if batchState.isAnyRecovery() {
 						panic(fmt.Sprintf("block gas limit overflow in recovery block: %d", blockNumber))
 					}
@@ -593,6 +608,7 @@ func sequencingBatchStep(
 				}
 
 				if err == nil {
+					metrics.GetLogStatistics().CumulativeValue(metrics.BatchGas, int64(execResult.UsedGas))
 					blockDataSizeChecker = &backupDataSizeChecker
 					batchState.onAddedTransaction(transaction, receipt, execResult, effectiveGas)
 					minedTxHashes = append(minedTxHashes, txHash)
@@ -656,6 +672,10 @@ func sequencingBatchStep(
 			}
 		}
 
+		// For X Layer
+		metrics.GetLogStatistics().CumulativeTiming(metrics.ProcessingTxTiming, time.Since(processingTxTime))
+		metrics.SeqTxDuration.Observe(float64(time.Since(processingTxTime).Milliseconds()))
+
 		// we do not want to commit this block if it has no transactions and we detected an overflow - essentially the batch is too
 		// full to get any more transactions in it and we don't want to commit an empty block
 		if emptyBlockOverflow {
@@ -676,6 +696,11 @@ func sequencingBatchStep(
 			return err
 		}
 
+		// For X Layer
+		// Count successful transactions
+		metrics.SeqTxCount.Add(float64(len(batchState.blockState.builtBlockElements.transactions)))
+		metrics.GetLogStatistics().CumulativeValue(metrics.TxCounter, int64(len(batchState.blockState.builtBlockElements.transactions)))
+
 		// add a check to the verifier and also check for responses
 		batchState.onBuiltBlock(blockNumber)
 
@@ -688,11 +713,13 @@ func sequencingBatchStep(
 		}
 
 		if !batchState.isL1Recovery() {
+			commitTime := time.Now()
 			// commit block data here so it is accessible in other threads
 			if errCommitAndStart := sdb.CommitAndStart(); errCommitAndStart != nil {
 				return errCommitAndStart
 			}
 			defer sdb.tx.Rollback()
+			metrics.GetLogStatistics().CumulativeTiming(metrics.BatchCommitDBTiming, time.Since(commitTime))
 		}
 
 		// remove mined transactions from the pool
@@ -735,14 +762,14 @@ func sequencingBatchStep(
 		// lets commit everything after updateStreamAndCheckRollback no matter of its result unless
 		// we're in L1 recovery where losing some blocks on restart doesn't matter
 
-		start := time.Now()
 		if !batchState.isL1Recovery() {
+			commitTime := time.Now()
 			if errCommitAndStart := sdb.CommitAndStart(); errCommitAndStart != nil {
 				return errCommitAndStart
 			}
 			defer sdb.tx.Rollback()
+			metrics.GetLogStatistics().CumulativeTiming(metrics.BatchCommitDBTiming, time.Since(commitTime))
 		}
-		metrics.GetLogStatistics().CumulativeTiming(metrics.BatchCommitDBTiming, time.Since(start))
 
 		// check the return values of updateStreamAndCheckRollback
 		if err != nil || needsUnwind {
@@ -772,9 +799,9 @@ func sequencingBatchStep(
 	metrics.GetLogStatistics().SetTag(metrics.BatchCloseReason, string(batchCloseReason))
 	metrics.GetLogStatistics().SetTag(metrics.FinalizeBatchNumber, strconv.Itoa(int(batchState.batchNumber)))
 	tryToSleepSequencer(cfg.zk.XLayer.SequencerBatchSleepDuration, logPrefix)
-	start := time.Now()
+	startCommitTime := time.Now()
 	err = sdb.tx.Commit()
-	metrics.GetLogStatistics().CumulativeTiming(metrics.BatchCommitDBTiming, time.Since(start))
+	metrics.GetLogStatistics().CumulativeTiming(metrics.BatchCommitDBTiming, time.Since(startCommitTime))
 
 	batchTime := time.Since(batchStart)
 	metrics.BatchExecuteTime(string(batchCloseReason), batchTime)
