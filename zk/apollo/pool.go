@@ -77,14 +77,14 @@ func setPoolFlag() {
 // Mutex read/write locks are to be held with every exposed methods to ensure
 // atomicity.
 
-func (cfg *ApolloConfig) CheckBlockedAddr(localBlockedList []string, addr libcommon.Address) bool {
+func (cfg *ApolloConfig) CheckBlockedAddr(localBlockedList libcommon.OrderedList[libcommon.Address], addr libcommon.Address) bool {
 	cfg.RLock()
 	defer cfg.RUnlock()
 
 	if cfg.isPoolEnabled() {
-		return containsAddress(cfg.EthCfg.DeprecatedTxPool.BlockedList, addr)
+		return cfg.EthCfg.DeprecatedTxPool.BlockedList.Contains(addr)
 	}
-	return containsAddress(localBlockedList, addr)
+	return localBlockedList.Contains(addr)
 }
 
 func (cfg *ApolloConfig) GetEnableWhitelist(localEnableWhitelist bool) bool {
@@ -97,34 +97,34 @@ func (cfg *ApolloConfig) GetEnableWhitelist(localEnableWhitelist bool) bool {
 	return localEnableWhitelist
 }
 
-func (cfg *ApolloConfig) CheckWhitelistAddr(localWhitelist []string, addr libcommon.Address) bool {
+func (cfg *ApolloConfig) CheckWhitelistAddr(localWhitelist libcommon.OrderedList[libcommon.Address], addr libcommon.Address) bool {
 	cfg.RLock()
 	defer cfg.RUnlock()
 
 	if cfg.isPoolEnabled() {
-		return containsAddress(cfg.EthCfg.DeprecatedTxPool.WhiteList, addr)
+		return cfg.EthCfg.DeprecatedTxPool.WhiteList.Contains(addr)
 	}
-	return containsAddress(localWhitelist, addr)
+	return localWhitelist.Contains(addr)
 }
 
-func (cfg *ApolloConfig) CheckFreeClaimAddr(localFreeClaimGasAddrs []string, addr libcommon.Address) bool {
+func (cfg *ApolloConfig) CheckFreeClaimAddr(localFreeClaimGasAddrs libcommon.OrderedList[libcommon.Address], addr libcommon.Address) bool {
 	cfg.RLock()
 	defer cfg.RUnlock()
 
 	if cfg.isPoolEnabled() {
-		return containsAddress(cfg.EthCfg.DeprecatedTxPool.FreeClaimGasAddrs, addr)
+		return cfg.EthCfg.DeprecatedTxPool.FreeClaimGasAddrs.Contains(addr)
 	}
-	return containsAddress(localFreeClaimGasAddrs, addr)
+	return localFreeClaimGasAddrs.Contains(addr)
 }
 
-func (cfg *ApolloConfig) CheckFreeGasExAddr(localFreeGasExAddrs []string, addr libcommon.Address) bool {
+func (cfg *ApolloConfig) CheckFreeGasExAddr(localFreeGasExAddrs libcommon.OrderedList[libcommon.Address], addr libcommon.Address) bool {
 	cfg.RLock()
 	defer cfg.RUnlock()
 
 	if cfg.isPoolEnabled() {
-		return containsAddress(cfg.EthCfg.DeprecatedTxPool.FreeGasExAddrs, addr)
+		return cfg.EthCfg.DeprecatedTxPool.FreeGasExAddrs.Contains(addr)
 	}
-	return containsAddress(localFreeGasExAddrs, addr)
+	return localFreeGasExAddrs.Contains(addr)
 }
 
 func (cfg *ApolloConfig) GetEnableFreeGasList(localEnableFreeGasList bool) bool {

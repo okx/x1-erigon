@@ -1976,7 +1976,7 @@ func setTxPool(ctx *cli.Context, fullCfg *ethconfig.Config) {
 
 	// For X Layer
 	setTxPoolXLayer(ctx, cfg)
-	
+
 	purgeEvery := ctx.Duration(TxpoolPurgeEveryFlag.Name)
 	purgeDistance := ctx.Duration(TxpoolPurgeDistanceFlag.Name)
 
