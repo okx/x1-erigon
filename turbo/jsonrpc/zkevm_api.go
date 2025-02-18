@@ -628,7 +628,7 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, rpcBatchNumber rp
 	if api.l1Syncer != nil {
 		accInputHash, err := api.getAccInputHash(ctx, hermezDb, batchNo)
 		if err != nil {
-			log.Error(fmt.Sprintf("failed to get acc input hash for batch %d: %v", batchNo, err))
+			log.Debug(fmt.Sprintf("failed to get acc input hash for batch %d: %v", batchNo, err))
 		}
 		if accInputHash == nil {
 			accInputHash = &common.Hash{}
@@ -1042,6 +1042,7 @@ func (api *ZkEvmAPIImpl) buildGenerator(ctx context.Context, tx kv.Tx, witnessMo
 		api.config.Zk,
 		api.ethApi._engine,
 		api.config.WitnessContractInclusion,
+		api.config.WitnessUnwindLimit,
 	)
 
 	fullWitness := false

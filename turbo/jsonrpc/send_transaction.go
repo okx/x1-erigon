@@ -13,6 +13,8 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/rpchelper"
+	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	"github.com/ledgerwatch/erigon/zk/utils"
 )
 
@@ -47,6 +49,25 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutility
 		return common.Hash{}, err
 	}
 
+	latestBlockNumber, err := rpchelper.GetLatestFinishedBlockNumber(tx)
+	if err != nil {
+		return common.Hash{}, err
+	}
+
+	header, err := api.blockByNumber(ctx, rpc.BlockNumber(latestBlockNumber), tx)
+	if err != nil {
+		return common.Hash{}, err
+	}
+
+	// now get the sender and put a lock in place for them
+	signer := types.MakeSigner(cc, latestBlockNumber, header.Time())
+	sender, err := txn.Sender(*signer)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	api.SenderLocks.AddLock(sender)
+	defer api.SenderLocks.ReleaseLock(sender)
+
 	if txn.Type() != types.LegacyTxType {
 		latestBlock, err := api.blockByNumber(ctx, rpc.LatestBlockNumber, tx)
 
@@ -63,6 +84,10 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutility
 		}
 	}
 
+	if api.RejectLowGasPriceTransactions && txn.GetPrice().Uint64() < api.DefaultGasPrice {
+		return common.Hash{}, errors.New("transaction price is too low")
+	}
+
 	// If the transaction fee cap is already specified, ensure the
 	// fee of the given transaction is _reasonable_.
 	if err := checkTxFee(txn.GetPrice().ToBig(), txn.GetGas(), api.FeeCap); err != nil {
@@ -70,20 +95,6 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutility
 	}
 	if !api.AllowPreEIP155Transactions && !txn.Protected() && !api.AllowUnprotectedTxs {
 		return common.Hash{}, errors.New("only replay-protected (EIP-155) transactions allowed over RPC")
-	}
-
-	// this has been moved to prior to adding of transactions to capture the
-	// pre state of the db - which is used for logging in the messages below
-	tx, err = api.db.BeginRo(ctx)
-	if err != nil {
-		return common.Hash{}, err
-	}
-
-	defer tx.Rollback()
-
-	cc, err = api.chainConfig(ctx, tx)
-	if err != nil {
-		return common.Hash{}, err
 	}
 
 	if txn.Protected() {
@@ -95,6 +106,17 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutility
 	}
 
 	hash := txn.Hash()
+
+	// [zkevm] - check if the transaction is a bad one
+	hermezDb := hermez_db.NewHermezDbReader(tx)
+	badTxHashCounter, err := hermezDb.GetBadTxHashCounter(hash)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	if badTxHashCounter >= api.BadTxAllowance {
+		return common.Hash{}, errors.New("transaction uses too many counters to fit into a batch")
+	}
+
 	res, err := api.txPool.Add(ctx, &txPoolProto.AddRequest{RlpTxs: [][]byte{encodedTx}})
 	if err != nil {
 		return common.Hash{}, err

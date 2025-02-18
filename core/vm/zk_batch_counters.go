@@ -88,6 +88,24 @@ func (bcc *BatchCounterCollector) AddNewTransactionCounters(txCounters *Transact
 	return bcc.CheckForOverflow(false) //no need to calculate the merkle proof here
 }
 
+// SingleTransactionOverflowCheck is used to check if a single transaction would overflow the batch counters
+// by creating a new counter collector and priming it for a single block with just this transaction
+// in it.  There is an assumption here that the tx counters being passed in have already been through execution
+func (bcc *BatchCounterCollector) SingleTransactionOverflowCheck(txCounters *TransactionCounter) (bool, error) {
+	err := txCounters.CalculateRlp()
+	if err != nil {
+		return true, err
+	}
+
+	bcc.transactions = append(bcc.transactions, txCounters)
+	bcc.UpdateRlpCountersCache(txCounters)
+	bcc.blockCount = 1 // simulate a single block
+
+	bcc.UpdateExecutionAndProcessingCountersCache(txCounters)
+
+	return bcc.CheckForOverflow(false) //no need to calculate the merkle proof here
+}
+
 func (bcc *BatchCounterCollector) RemovePreviousTransactionCounters() {
 	lastTx := bcc.transactions[len(bcc.transactions)-1]
 	bcc.UndoTransactionCountersCache(lastTx)
@@ -275,12 +293,15 @@ func (bcc *BatchCounterCollector) CombineCollectorsNoChanges() Counters {
 		}
 	}
 
+	txCounters := NewCounters()
 	for _, tx := range bcc.transactions {
-		txCounters := tx.CombineCounters()
+		_ = tx.CombineCountersInto(&txCounters)
 		for k, v := range txCounters {
 			combined[k].used += v.used
 			combined[k].remaining -= v.used
 		}
+
+		txCounters.NullateUsed()
 	}
 
 	return combined

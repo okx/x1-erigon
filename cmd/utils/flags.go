@@ -415,6 +415,11 @@ var (
 		Usage: "L2 datastreamer endpoint",
 		Value: "",
 	}
+	L2DataStreamerUseTLSFlag = cli.BoolFlag{
+		Name:  "zkevm.l2-datastreamer-use-tls",
+		Usage: "Use TLS connection to L2 datastreamer endpoint",
+		Value: false,
+	}
 	L2DataStreamerTimeout = cli.StringFlag{
 		Name:  "zkevm.l2-datastreamer-timeout",
 		Usage: "The time to wait for data to arrive from the stream before reporting an error (0s doesn't check)",
@@ -591,6 +596,11 @@ var (
 		Usage: "A comma separated list of grpc addresses that host executors",
 		Value: "",
 	}
+	ExecutorEnabled = cli.BoolFlag{
+		Name:  "zkevm.executor-enabled",
+		Usage: "Enables the executor. Used for testing limbo, when executor-urls are set, but we don't want to use them, only in limbo to verify limbo transactions. For this case, set it to false. Defaulted to true",
+		Value: true,
+	}
 	ExecutorStrictMode = cli.BoolFlag{
 		Name:  "zkevm.executor-strict",
 		Usage: "Defaulted to true to ensure you must set some executor URLs, bypass this restriction by setting to false",
@@ -612,6 +622,12 @@ var (
 		Usage: "A size of the memdb used on witness generation in format \"2GB\". Might fail generation for older batches if not enough for the unwind.",
 		Value: datasizeFlagValue(2 * datasize.GB),
 	}
+	WitnessUnwindLimit = cli.Uint64Flag{
+		Name:  "zkevm.witness-unwind-limit",
+		Usage: "The maximum number of blocks the witness generation can unwind",
+		Value: 500_000,
+	}
+
 	ExecutorMaxConcurrentRequests = cli.IntFlag{
 		Name:  "zkevm.executor-max-concurrent-requests",
 		Usage: "The maximum number of concurrent requests to the executor",
@@ -665,6 +681,11 @@ var (
 	AllowFreeTransactions = cli.BoolFlag{
 		Name:  "zkevm.allow-free-transactions",
 		Usage: "Allow the sequencer to proceed transactions with 0 gas price",
+		Value: false,
+	}
+	RejectLowGasPriceTransactions = cli.BoolFlag{
+		Name:  "zkevm.reject-low-gas-price-transactions",
+		Usage: "Reject the sequencer to proceed transactions with low gas price",
 		Value: false,
 	}
 	AllowPreEIP155Transactions = cli.BoolFlag{
@@ -788,6 +809,11 @@ var (
 		Usage: "Contracts that will have all of their storage added to the witness every time",
 		Value: "",
 	}
+	BadTxAllowance = cli.Uint64Flag{
+		Name:  "zkevm.bad-tx-allowance",
+		Usage: "The maximum number of times a transaction that consumes too many counters to fit into a batch will be attempted before it is rejected outright by eth_sendRawTransaction",
+		Value: 2,
+	}
 	ACLPrintHistory = cli.IntFlag{
 		Name:  "acl.print-history",
 		Usage: "Number of entries to print from the ACL history on node start up",
@@ -834,6 +860,11 @@ var (
 		Name:  "rpc.returndata.limit",
 		Usage: "Maximum number of bytes returned from eth_call or similar invocations",
 		Value: 100_000,
+	}
+	RpcLogsMaxRange = cli.Uint64Flag{
+		Name:  "rpc.logs.maxrange",
+		Usage: "Maximum range of logs that can be requested in a single call",
+		Value: 1000,
 	}
 	HTTPTraceFlag = cli.BoolFlag{
 		Name:  "http.trace",
@@ -2376,6 +2407,8 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 
 	if ctx.IsSet(TxPoolGossipDisableFlag.Name) {
 		cfg.DisableTxPoolGossip = ctx.Bool(TxPoolGossipDisableFlag.Name)
+	} else {
+		cfg.DisableTxPoolGossip = txpoolcfg.DefaultConfig.NoGossip
 	}
 }
 
