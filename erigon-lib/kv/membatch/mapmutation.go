@@ -256,24 +256,26 @@ func (m *Mapmutation) doCommit(tx kv.RwTx) error {
 	keyCount := 0
 	total := m.count
 
-	// 设置批量限制
+	// 批量限制
 	batchLimit := 1000
-	for table, bucket := range m.puts {
-		// 预分配更大的内存池以减少内存分配
-		batchKeys := make([][]byte, 0, batchLimit*2)
-		batchValues := make([][]byte, 0, batchLimit*2)
-		collector := etl.NewCollector("", m.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize/2), m.logger)
-		collector.SortAndFlushInBackground(true)
+	// 预分配批次内存池，减少内存分配
+	batchKeys := make([][]byte, 0, batchLimit)
+	batchValues := make([][]byte, 0, batchLimit)
+	collector := etl.NewCollector("", m.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize/2), m.logger)
+	defer collector.Close()
 
+	// 开启后台排序与刷新
+	collector.SortAndFlushInBackground(true)
+
+	for table, bucket := range m.puts {
 		for key, value := range bucket {
 			// 批量填充数据
 			batchKeys = append(batchKeys, []byte(key))
 			batchValues = append(batchValues, value)
 			keyCount++
 
-			// 达到批量限制时进行处理
+			// 达到批量限制时进行批量操作
 			if len(batchKeys) >= batchLimit {
-				// 批量收集
 				if err := collectBatch(collector, batchKeys, batchValues); err != nil {
 					return err
 				}
@@ -282,7 +284,7 @@ func (m *Mapmutation) doCommit(tx kv.RwTx) error {
 				batchValues = batchValues[:0]
 			}
 
-			// 每 30s 记录一次进度，减少日志记录频率
+			// 每 30s 记录一次进度，减少日志记录的频率
 			if time.Since(startTime) > 30*time.Second {
 				progress := fmt.Sprintf("%.1fM/%.1fM", float64(keyCount)/1_000_000, total/1_000_000)
 				m.logger.Info("Write to db", "progress", progress, "current table", table)
@@ -302,6 +304,10 @@ func (m *Mapmutation) doCommit(tx kv.RwTx) error {
 		if err := collector.Load(tx, table, etl.IdentityLoadFunc, etl.TransformArgs{Quit: m.quit}); err != nil {
 			return err
 		}
+
+		// 清理数据
+		batchKeys = batchKeys[:0]
+		batchValues = batchValues[:0]
 	}
 
 	tx.CollectMetrics()
