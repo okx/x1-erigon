@@ -259,13 +259,11 @@ func (m *Mapmutation) doCommit(tx kv.RwTx) error {
 	// 设置批量限制
 	batchLimit := 1000
 	for table, bucket := range m.puts {
+		// 预分配更大的内存池以减少内存分配
+		batchKeys := make([][]byte, 0, batchLimit*2)
+		batchValues := make([][]byte, 0, batchLimit*2)
 		collector := etl.NewCollector("", m.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize/2), m.logger)
-		defer collector.Close()
 		collector.SortAndFlushInBackground(true)
-
-		// 预分配批次内存池，避免频繁的内存分配
-		batchKeys := make([][]byte, 0, batchLimit)
-		batchValues := make([][]byte, 0, batchLimit)
 
 		for key, value := range bucket {
 			// 批量填充数据
