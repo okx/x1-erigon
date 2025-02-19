@@ -89,7 +89,7 @@ func NewMDBX(log log.Logger) MdbxOpts {
 		mapSize:         DefaultMapSize,
 		growthStep:      DefaultGrowthStep,
 		mergeThreshold:  3 * 8192,
-		shrinkThreshold: -1, // default
+		shrinkThreshold: 2 * 1024 * 1024 * 1024, // default
 		label:           kv.InMem,
 	}
 	return opts
@@ -191,6 +191,9 @@ func (opts MdbxOpts) MapSize(sz datasize.ByteSize) MdbxOpts {
 
 func (opts MdbxOpts) WriteMap() MdbxOpts {
 	opts.flags |= mdbx.WriteMap
+	opts.flags |= mdbx.SafeNoSync
+	opts.flags |= mdbx.LifoReclaim
+	opts.flags |= mdbx.Coalesce
 	return opts
 }
 func (opts MdbxOpts) LifoReclaim() MdbxOpts {
@@ -279,6 +282,10 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 		return nil, err
 	}
 	if err = env.SetOption(mdbx.OptMaxReaders, kv.ReadersLimit); err != nil {
+		return nil, err
+	}
+
+	if err = env.SetGeometry(-1, -1, int(opts.mapSize), int(opts.growthStep), opts.shrinkThreshold, int(opts.pageSize)); err != nil {
 		return nil, err
 	}
 

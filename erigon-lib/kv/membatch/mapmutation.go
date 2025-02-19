@@ -5,13 +5,13 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/etl"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 	"unsafe"
 
-	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -252,31 +252,55 @@ func (m *Mapmutation) Delete(table string, k []byte) error {
 }
 
 func (m *Mapmutation) doCommit(tx kv.RwTx) error {
-	logEvery := time.NewTicker(30 * time.Second)
-	defer logEvery.Stop()
-	count := 0
-	total := float64(m.count)
+	startTime := time.Now()
+	keyCount := 0
+	total := m.count
+
 	for table, bucket := range m.puts {
 		collector := etl.NewCollector("", m.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize/2), m.logger)
 		defer collector.Close()
 		collector.SortAndFlushInBackground(true)
+
+		batchLimit := 1000 // 批量写入 1000 条数据
+		batchKeys := make([][]byte, 0, batchLimit)
+		batchValues := make([][]byte, 0, batchLimit)
+
 		for key, value := range bucket {
-			if err := collector.Collect([]byte(key), value); err != nil {
-				return err
+			batchKeys = append(batchKeys, []byte(key))
+			batchValues = append(batchValues, value)
+			keyCount++
+
+			// 达到 batchLimit 时写入
+			if len(batchKeys) >= batchLimit {
+				for i := 0; i < batchLimit; i++ {
+					if err := collector.Collect(batchKeys[i], batchValues[i]); err != nil {
+						return err
+					}
+				}
+				batchKeys = batchKeys[:0] // 清空 batch
+				batchValues = batchValues[:0]
 			}
-			count++
-			select {
-			default:
-			case <-logEvery.C:
-				progress := fmt.Sprintf("%.1fM/%.1fM", float64(count)/1_000_000, total/1_000_000)
+
+			// 每 30s 记录一次进度
+			if time.Since(startTime) > 30*time.Second {
+				progress := fmt.Sprintf("%.1fM/%.1fM", float64(keyCount)/1_000_000, total/1_000_000)
 				m.logger.Info("Write to db", "progress", progress, "current table", table)
 				tx.CollectMetrics()
+				startTime = time.Now()
 			}
 		}
+
+		// 处理剩余未满 batchLimit 的数据
+		for i := range batchKeys {
+			if err := collector.Collect(batchKeys[i], batchValues[i]); err != nil {
+				return err
+			}
+		}
+
+		// 一次性 Load()，减少写入 `tx` 的开销
 		if err := collector.Load(tx, table, etl.IdentityLoadFunc, etl.TransformArgs{Quit: m.quit}); err != nil {
 			return err
 		}
-		collector.Close()
 	}
 
 	tx.CollectMetrics()
