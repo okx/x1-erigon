@@ -66,3 +66,4 @@ metrics.port: 9095
 yieldsize: 35
 zkevm.seal-batch-immediately-on-overflow: true
 zkevm.sequencer-timeout-on-empty-tx-pool: 1ms
+zkevm.disable-virtual-counters: false
