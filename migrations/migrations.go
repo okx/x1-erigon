@@ -202,7 +202,6 @@ func (m *Migrator) Apply(db kv.RwDB, dataDir string, logger log.Logger) error {
 		}); err != nil {
 			return fmt.Errorf("migrator.Apply: %w", err)
 		}
-
 		dirs.Tmp = filepath.Join(dirs.DataDir, "migrations", v.Name)
 		if err := v.Up(db, dirs, progress, func(tx kv.RwTx, key []byte, isDone bool) error {
 			if !isDone {
@@ -214,7 +213,6 @@ func (m *Migrator) Apply(db kv.RwDB, dataDir string, logger log.Logger) error {
 				return nil
 			}
 			callbackCalled = true
-
 			stagesProgress, err := MarshalMigrationPayload(tx)
 			if err != nil {
 				return err
@@ -239,6 +237,7 @@ func (m *Migrator) Apply(db kv.RwDB, dataDir string, logger log.Logger) error {
 		}
 		logger.Info("Applied migration", "name", v.Name)
 	}
+
 	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
 		return rawdb.WriteDBSchemaVersion(tx)
 	}); err != nil {

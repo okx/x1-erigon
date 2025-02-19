@@ -1,9 +1,39 @@
 # syntax = docker/dockerfile:1.2
+FROM alpine:latest AS rocksdb-builder
+RUN apk --no-cache add \
+    build-base \
+    linux-headers \
+    git \
+    bash \
+    perl \
+    snappy-dev \
+    zlib-dev \
+    bzip2-dev \
+    lz4-dev \
+    zstd-dev \
+    gflags-dev \
+    bzip2
+
+
+RUN git clone --depth 1 -b 9.8.fb https://github.com/facebook/rocksdb.git /rocksdb \
+    && cd /rocksdb \
+    && make -j$(nproc) shared_lib \
+    && cp librocksdb.* /usr/lib/ \
+    && cp -r include/rocksdb /usr/include/
+
 FROM docker.io/library/golang:1.21-alpine3.17 AS builder
 
 RUN apk --no-cache add build-base linux-headers git bash ca-certificates libstdc++
 
 WORKDIR /app
+COPY --from=rocksdb-builder /usr/lib/librocksdb.* /usr/lib/
+COPY --from=rocksdb-builder /usr/include/rocksdb /usr/include/rocksdb
+COPY --from=rocksdb-builder /usr/lib/libzstd.so* /usr/lib/
+COPY --from=rocksdb-builder /usr/lib/liblz4.so* /usr/lib/
+COPY --from=rocksdb-builder /usr/lib/libz.so* /usr/lib/
+COPY --from=rocksdb-builder /usr/lib/libsnappy.so* /usr/lib/
+COPY --from=rocksdb-builder /usr/lib/libbz2.so.1 /usr/lib
+
 ADD go.mod go.mod
 ADD go.sum go.sum
 ADD erigon-lib/go.mod erigon-lib/go.mod
@@ -52,6 +82,15 @@ WORKDIR /home/erigon
 
 ## then give each binary its own layer
 COPY --from=builder /app/build/bin/cdk-erigon /usr/local/bin/cdk-erigon
+COPY --from=rocksdb-builder /usr/lib/librocksdb.* /usr/lib/
+COPY --from=rocksdb-builder /usr/lib/liblz4.so* /usr/lib/
+COPY --from=rocksdb-builder /usr/lib/libsnappy.so* /usr/lib/
+COPY --from=rocksdb-builder /usr/lib/libbz2.so* /usr/lib
+COPY --from=rocksdb-builder /usr/lib/libzstd.so* /usr/lib/
+COPY --from=rocksdb-builder /usr/lib/libbz2.so* /usr/lib
+COPY --from=rocksdb-builder /usr/lib/libgflags.so* /usr/lib/
+
+
 
 EXPOSE 8545 \
        8551 \

@@ -20,13 +20,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/kv/rocksdb"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/c2h5oh/datasize"
 	"golang.org/x/sync/semaphore"
 
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
@@ -40,7 +40,6 @@ import (
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/migrations"
 )
@@ -325,11 +324,12 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 			roTxLimit = int64(config.Http.DBReadConcurrency)
 		}
 		roTxsLimiter := semaphore.NewWeighted(roTxLimit) // 1 less than max to allow unlocking to happen
-		opts := mdbx.NewMDBX(logger).
-			Path(dbPath).Label(label).
-			GrowthStep(16 * datasize.MB).
-			DBVerbosity(config.DatabaseVerbosity).RoTxsLimiter(roTxsLimiter)
+		//opts2 := mdbx.NewMDBX(logger).
+		//	Path(dbPath).Label(label).
+		//	GrowthStep(16 * datasize.MB).
+		//	DBVerbosity(config.DatabaseVerbosity).RoTxsLimiter(roTxsLimiter)
 
+		opts := rocksdb.NewRocksDBOpts(logger).Label(label).Path(dbPath).DBVerbosity(config.DatabaseVerbosity).RoTxsLimiter(roTxsLimiter)
 		if readonly {
 			opts = opts.Readonly()
 		}
@@ -339,28 +339,28 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 
 		switch label {
 		case kv.ChainDB:
-			if config.MdbxPageSize.Bytes() > 0 {
-				opts = opts.PageSize(config.MdbxPageSize.Bytes())
-			}
-			if config.MdbxDBSizeLimit > 0 {
-				opts = opts.MapSize(config.MdbxDBSizeLimit)
-			}
-			if config.MdbxGrowthStep > 0 {
-				opts = opts.GrowthStep(config.MdbxGrowthStep)
-			}
-			opts = opts.DirtySpace(uint64(512 * datasize.MB))
+			//if config.MdbxPageSize.Bytes() > 0 {
+			//	opts = opts.PageSize(config.MdbxPageSize.Bytes())
+			//}
+			//if config.MdbxDBSizeLimit > 0 {
+			//	opts = opts.MapSize(config.MdbxDBSizeLimit)
+			//}
+			//if config.MdbxGrowthStep > 0 {
+			//	opts = opts.GrowthStep(config.MdbxGrowthStep)
+			//}
+			//opts = opts.DirtySpace(uint64(512 * datasize.MB))
 		case kv.ConsensusDB:
-			if config.MdbxPageSize.Bytes() > 0 {
-				opts = opts.PageSize(config.MdbxPageSize.Bytes())
-			}
-			// Don't adjust up the consensus DB - this will lead to resource exhaustion lor large map sizes
-			if config.MdbxDBSizeLimit > 0 && config.MdbxDBSizeLimit < mdbx.DefaultMapSize {
-				opts = opts.MapSize(config.MdbxDBSizeLimit)
-			}
-			// Don't adjust up the consensus DB - to align with db size limit above
-			if config.MdbxGrowthStep > 0 && config.MdbxGrowthStep < mdbx.DefaultGrowthStep {
-				opts = opts.GrowthStep(config.MdbxGrowthStep)
-			}
+			//if config.MdbxPageSize.Bytes() > 0 {
+			//	opts = opts.PageSize(config.MdbxPageSize.Bytes())
+			//}
+			//// Don't adjust up the consensus DB - this will lead to resource exhaustion lor large map sizes
+			//if config.MdbxDBSizeLimit > 0 && config.MdbxDBSizeLimit < mdbx.DefaultMapSize {
+			//	opts = opts.MapSize(config.MdbxDBSizeLimit)
+			//}
+			//// Don't adjust up the consensus DB - to align with db size limit above
+			//if config.MdbxGrowthStep > 0 && config.MdbxGrowthStep < mdbx.DefaultGrowthStep {
+			//	opts = opts.GrowthStep(config.MdbxGrowthStep)
+			//}
 		default:
 		}
 
