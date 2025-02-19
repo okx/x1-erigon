@@ -383,6 +383,7 @@ services:
     container_name: xlayer-seq
     image: cdk-erigon
     environment:
+      - WRITE_MAP=true
       - CDK_ERIGON_SEQUENCER=1
     ports:
       - 6060:6060
