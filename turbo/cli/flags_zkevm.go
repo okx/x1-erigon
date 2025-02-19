@@ -115,6 +115,7 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	}
 
 	witnessMemSize := utils.DatasizeFlagValue(ctx, utils.WitnessMemdbSize.Name)
+	witnessUnwindLimit := ctx.Uint64(utils.WitnessUnwindLimit.Name)
 
 	badBatchStrings := strings.Split(ctx.String(utils.BadBatches.Name), ",")
 	badBatches := make([]uint64, 0)
@@ -151,6 +152,7 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		L2ChainId:                              ctx.Uint64(utils.L2ChainIdFlag.Name),
 		L2RpcUrl:                               ctx.String(utils.L2RpcUrlFlag.Name),
 		L2DataStreamerUrl:                      ctx.String(utils.L2DataStreamerUrlFlag.Name),
+		L2DataStreamerUseTLS:                   ctx.Bool(utils.L2DataStreamerUseTLSFlag.Name),
 		L2DataStreamerTimeout:                  l2DataStreamTimeout,
 		L2ShortCircuitToVerifiedBatch:          l2ShortCircuitToVerifiedBatchVal,
 		L1SyncStartBlock:                       ctx.Uint64(utils.L1SyncStartBlock.Name),
@@ -191,11 +193,14 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		ExecutorUrls:                           strings.Split(strings.ReplaceAll(ctx.String(utils.ExecutorUrls.Name), " ", ""), ","),
 		ExecutorStrictMode:                     ctx.Bool(utils.ExecutorStrictMode.Name),
 		ExecutorRequestTimeout:                 ctx.Duration(utils.ExecutorRequestTimeout.Name),
+		ExecutorEnabled:                        ctx.Bool(utils.ExecutorEnabled.Name),
 		DatastreamNewBlockTimeout:              ctx.Duration(utils.DatastreamNewBlockTimeout.Name),
 		WitnessMemdbSize:                       *witnessMemSize,
+		WitnessUnwindLimit:                     witnessUnwindLimit,
 		ExecutorMaxConcurrentRequests:          ctx.Int(utils.ExecutorMaxConcurrentRequests.Name),
 		Limbo:                                  ctx.Bool(utils.Limbo.Name),
 		AllowFreeTransactions:                  ctx.Bool(utils.AllowFreeTransactions.Name),
+		RejectLowGasPriceTransactions:          ctx.Bool(utils.RejectLowGasPriceTransactions.Name),
 		AllowPreEIP155Transactions:             ctx.Bool(utils.AllowPreEIP155Transactions.Name),
 		EffectiveGasPriceForEthTransfer:        uint8(math.Round(effectiveGasPriceForEthTransferVal * 255.0)),
 		EffectiveGasPriceForErc20Transfer:      uint8(math.Round(effectiveGasPriceForErc20TransferVal * 255.0)),
@@ -229,6 +234,7 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		MockWitnessGeneration:                  ctx.Bool(utils.MockWitnessGeneration.Name),
 		WitnessCacheLimit:                      witnessCacheLimit,
 		WitnessContractInclusion:               witnessInclusion,
+		BadTxAllowance:                         ctx.Uint64(utils.BadTxAllowance.Name),
 	}
 
 	// For X Layer
@@ -242,6 +248,7 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	} else {
 		checkFlag(utils.ExecutorUrls.Name, cfg.ExecutorUrls)
 		checkFlag(utils.ExecutorStrictMode.Name, cfg.ExecutorStrictMode)
+		checkFlag(utils.ExecutorEnabled.Name, cfg.ExecutorEnabled)
 		checkFlag(utils.DataStreamHost.Name, cfg.DataStreamHost)
 		checkFlag(utils.DataStreamPort.Name, cfg.DataStreamPort)
 		checkFlag(utils.DataStreamWriteTimeout.Name, cfg.DataStreamWriteTimeout)
@@ -259,7 +266,7 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 			panic("You cannot disable virtual counters when running in strict mode")
 		}
 
-		if len(cfg.ExecutorUrls) > 0 && cfg.ExecutorUrls[0] != "" && cfg.DisableVirtualCounters {
+		if cfg.UseExecutors() && cfg.DisableVirtualCounters {
 			panic("You cannot disable virtual counters when running with executors")
 		}
 	}
