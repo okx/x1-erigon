@@ -53,13 +53,14 @@ func (l *statisticsInstance) Summary() string {
 	gasUsed := "GasUsed<" + strconv.Itoa(int(l.statistics[BatchGas])) + ">, "
 	blockCount := "Block<" + strconv.Itoa(int(l.statistics[BlockCounter])) + ">, "
 	tx := "Tx<" + strconv.Itoa(int(l.statistics[TxCounter])) + ">, "
-	getTx := "GetTx<" + strconv.Itoa(int(l.statistics[GetTx])) + "ms>, "
 	getTxPause := "GetTxPause<" + strconv.Itoa(int(l.statistics[GetTxPauseCounter])) + ">, "
-	getTxPauseTiming := "GetTxPauseTiming<" + strconv.Itoa(int(l.statistics[GetTxPauseTiming])) + "ms>, "
 	reprocessTx := "ReprocessTx<" + strconv.Itoa(int(l.statistics[ReprocessingTxCounter])) + ">, "
-	resourceOverTx := "ResourceOverTx<" + strconv.Itoa(int(l.statistics[FailTxResourceOverCounter])) + ">, "
+	gasOverTx := "GasOverTx<" + strconv.Itoa(int(l.statistics[FailTxGasOverCounter])) + ">, "
 	zkOverflowBlock := "ZKOverflowBlock<" + strconv.Itoa(int(l.statistics[ZKOverflowBlockCounter])) + ">, "
 	invalidTx := "InvalidTx<" + strconv.Itoa(int(l.statistics[ProcessingInvalidTxCounter])) + ">, "
+	sequencingBatchTiming := "SequencingBatchTiming<" + strconv.Itoa(int(l.statistics[SequencingBatchTiming])) + "ms>, "
+	getTxTiming := "GetTxTiming<" + strconv.Itoa(int(l.statistics[GetTxTiming])) + "ms>, "
+	getTxPauseTiming := "GetTxPauseTiming<" + strconv.Itoa(int(l.statistics[GetTxPauseTiming])) + "ms>, "
 	processTxTiming := "ProcessTx<" + strconv.Itoa(int(l.statistics[ProcessingTxTiming])) + "ms>, "
 	batchCommitDBTiming := "BatchCommitDBTiming<" + strconv.Itoa(int(l.statistics[BatchCommitDBTiming])) + "ms>, "
 	pbStateTiming := "PbStateTiming<" + strconv.Itoa(int(l.statistics[PbStateTiming])) + "ms>, "
@@ -67,8 +68,8 @@ func (l *statisticsInstance) Summary() string {
 	finaliseBlockWriteTiming := "FinaliseBlockWriteTiming<" + strconv.Itoa(int(l.statistics[FinaliseBlockWriteTiming])) + "ms>, "
 	batchCloseReason := "BatchCloseReason<" + l.tags[BatchCloseReason] + ">"
 
-	result := batch + totalDuration + gasUsed + blockCount + tx + getTx + getTxPause + getTxPauseTiming +
-		reprocessTx + resourceOverTx + zkOverflowBlock + invalidTx + processTxTiming + pbStateTiming +
+	result := batch + totalDuration + gasUsed + blockCount + tx + getTxPause +
+		reprocessTx + gasOverTx + zkOverflowBlock + invalidTx + sequencingBatchTiming + getTxTiming + processTxTiming + getTxPauseTiming + pbStateTiming +
 		zkIncIntermediateHashesTiming + finaliseBlockWriteTiming + batchCommitDBTiming +
 		batchCloseReason
 	log.Info(result)
