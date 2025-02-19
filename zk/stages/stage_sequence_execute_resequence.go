@@ -5,6 +5,8 @@ import (
 	"fmt"
 
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
+	"github.com/ledgerwatch/erigon/zk/datastream/server"
+	"github.com/ledgerwatch/erigon/zk/datastream/types"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -16,6 +18,7 @@ func resequence(
 	cfg SequenceBlockCfg,
 	historyCfg stagedsync.HistoryCfg,
 	lastBatch, highestBatchInDs uint64,
+	externalDataStreamServer server.DataStreamServer,
 ) (err error) {
 	if !cfg.zk.SequencerResequence {
 		panic(fmt.Sprintf("[%s] The node need re-sequencing but this option is disabled.", s.LogPrefix()))
@@ -35,7 +38,12 @@ func resequence(
 
 	log.Info(fmt.Sprintf("[%s] Last batch %d is lower than highest batch in datastream %d, resequencing from batch %d to %d ...", s.LogPrefix(), lastBatch, highestBatchInDs, lastBatch+1, haltBatch))
 
-	batches, err := cfg.dataStreamServer.ReadBatchesWithConcurrency(lastBatch+1, haltBatch)
+	var batches [][]*types.FullL2Block
+	if cfg.zk.SequencerResequenceExternalDatastream {
+		batches, err = externalDataStreamServer.ReadBatchesWithConcurrency(lastBatch+1, haltBatch)
+	} else {
+		batches, err = cfg.dataStreamServer.ReadBatchesWithConcurrency(lastBatch+1, haltBatch)
+	}
 	if err != nil {
 		return err
 	}
@@ -74,11 +82,18 @@ func resequence(
 
 	log.Info(fmt.Sprintf("[%s] Deleted L1InfoTreeIndexesProgress from block %d to %d", s.LogPrefix(), fromBlock, latestBlockNumber))
 
-	if err = cfg.dataStreamServer.UnwindToBatchStart(lastBatch + 1); err != nil {
+	localHighestBatchInDs, err := cfg.dataStreamServer.GetHighestBatchNumber()
+	if err != nil {
 		return err
+	}
+	if localHighestBatchInDs > lastBatch {
+		if err = cfg.dataStreamServer.UnwindToBatchStart(lastBatch + 1); err != nil {
+			return err
+		}
 	}
 
 	log.Info(fmt.Sprintf("[%s] Resequence from batch %d to %d in data stream", s.LogPrefix(), lastBatch+1, haltBatch))
+
 	for _, batch := range batches {
 		batchJob := NewResequenceBatchJob(batch)
 		subBatchCount := 0
@@ -86,7 +101,6 @@ func resequence(
 			if err = sequencingBatchStep(s, u, ctx, cfg, historyCfg, batchJob); err != nil {
 				return err
 			}
-
 			subBatchCount += 1
 		}
 

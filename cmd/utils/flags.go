@@ -586,6 +586,11 @@ var (
 		Usage: "Halt the sequencer on this batch number when resequencing",
 		Value: 0,
 	}
+	SequencerResequenceExternalDatastream = cli.BoolFlag{
+		Name:  "zkevm.sequencer-resequence-external-datastream",
+		Usage: "When enabled, the sequencer will create a new data stream server connected to an external datastream file and read batches from it",
+		Value: false,
+	}
 	SequencerResequenceStrict = cli.BoolFlag{
 		Name:  "zkevm.sequencer-resequence-strict",
 		Usage: "Strictly resequence the rolledback batches",

@@ -10,6 +10,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
 
+	"github.com/0xPolygonHermez/zkevm-data-streamer/datastreamer"
+	dslog "github.com/0xPolygonHermez/zkevm-data-streamer/log"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -17,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/zk"
+	"github.com/ledgerwatch/erigon/zk/datastream/server"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	"github.com/ledgerwatch/erigon/zk/metrics"
 	zktx "github.com/ledgerwatch/erigon/zk/tx"
@@ -44,13 +47,23 @@ func SpawnSequencingStage(
 		return err
 	}
 
-	highestBatchInDs, err := cfg.dataStreamServer.GetHighestBatchNumber()
-	if err != nil {
-		return err
+	var highestBatchInDs uint64
+	var externalDataStreamServer server.DataStreamServer
+	if cfg.zk.SequencerResequenceExternalDatastream {
+		externalDataStreamServer, err = createExternalDataStreamServer(cfg)
+		highestBatchInDs, err = externalDataStreamServer.GetHighestBatchNumber()
+		if err != nil {
+			return err
+		}
+	} else {
+		highestBatchInDs, err = cfg.dataStreamServer.GetHighestBatchNumber()
+		if err != nil {
+			return err
+		}
 	}
 
 	if lastBatch < highestBatchInDs {
-		return resequence(s, u, ctx, cfg, historyCfg, lastBatch, highestBatchInDs)
+		return resequence(s, u, ctx, cfg, historyCfg, lastBatch, highestBatchInDs, externalDataStreamServer)
 	}
 
 	if cfg.zk.SequencerResequence {
@@ -840,4 +853,42 @@ func handleBadTxHashCounter(hermezDb *hermez_db.HermezDb, txHash common.Hash) (u
 	newCounter := counter + 1
 	hermezDb.WriteBadTxHashCounter(txHash, newCounter)
 	return newCounter, nil
+}
+
+func createExternalDataStreamServer(cfg SequenceBlockCfg) (server.DataStreamServer, error) {
+	// Use hardcoded timeout values & port & datastream file
+	writeTimeout := 20 * time.Second
+	inactivityTimeout := 10 * time.Minute
+	inactivityCheckInterval := 5 * time.Minute
+	port := uint16(16900)
+	datastreamFile := "/home/data-stream"
+
+	logConfig := &dslog.Config{
+		Environment: "production",
+		Level:       "warn",
+		Outputs:     nil,
+	}
+
+	factory := server.NewZkEVMDataStreamServerFactory()
+
+	streamServer, err := factory.CreateStreamServer(
+		port,
+		uint8(cfg.zk.DatastreamVersion),
+		1,
+		datastreamer.StreamType(1),
+		datastreamFile,
+		writeTimeout,
+		inactivityTimeout,
+		inactivityCheckInterval,
+		logConfig,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create stream server: %v", err)
+	}
+
+	fmt.Printf("Successfully created external data stream server with file: %s\n", datastreamFile)
+
+	dataStreamServer := factory.CreateDataStreamServer(streamServer, cfg.zk.L2ChainId)
+
+	return dataStreamServer, nil
 }

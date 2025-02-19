@@ -189,6 +189,7 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		SequencerHaltOnBatchNumber:             ctx.Uint64(utils.SequencerHaltOnBatchNumber.Name),
 		SequencerResequence:                    ctx.Bool(utils.SequencerResequence.Name),
 		SequencerResequenceHaltOnBatchNumber:   ctx.Uint64(utils.SequencerResequenceHaltOnBatchNumber.Name),
+		SequencerResequenceExternalDatastream:  ctx.Bool(utils.SequencerResequenceExternalDatastream.Name),
 		SequencerResequenceStrict:              ctx.Bool(utils.SequencerResequenceStrict.Name),
 		SequencerResequenceReuseL1InfoIndex:    ctx.Bool(utils.SequencerResequenceReuseL1InfoIndex.Name),
 		ExecutorUrls:                           strings.Split(strings.ReplaceAll(ctx.String(utils.ExecutorUrls.Name), " ", ""), ","),
