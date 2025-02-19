@@ -677,6 +677,7 @@ func HashContractBytecode(bc string) string {
 	return ConvertBigIntToHex(HashContractBytecodeBigInt(bc))
 }
 
+// keep this slower implementation for testing purposes
 func HashContractBytecodeBigIntV1(bc string) *big.Int {
 	bytecode := bc
 
@@ -775,10 +776,7 @@ func HashContractBytecodeBigInt(bc string) *big.Int {
 	MT := BYTECODE_ELEMENTS_HASH * BYTECODE_BYTES_ELEMENT
 	bb := make([]byte, MT*(((len(bytecode)/2+1)/MT)+1))
 	for i := 0; i < len(bytecode)/2; i++ {
-		// use strconv.ParseInt
-		// x, _ := strconv.ParseInt(bytecode[2*i:2*i+2], 16, 64)
-		// bb[i] = byte(x)
-		// simple
+		// use a simple conversion which is faster than strconv.ParseInt(bytecode[2*i:2*i+2], 16, 64)
 		bb[i] = byte(charToDigit(bytecode[2*i])<<4 + charToDigit(bytecode[2*i+1]))
 	}
 	for i := len(bytecode) / 2; i < len(bb); i++ {

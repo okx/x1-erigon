@@ -55,8 +55,6 @@ func BenchmarkHashContractBytecode(b *testing.B) {
 	str := strings.Repeat("7e", 500)
 	h1 := HashContractBytecodeBigIntV1(str)
 	h2 := HashContractBytecodeBigInt(str)
-	fmt.Println(h1)
-	fmt.Println(h2)
 	if h1.Cmp(h2) != 0 {
 		panic("hashes do not match")
 	}
