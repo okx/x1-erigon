@@ -103,7 +103,7 @@ jobs:
           docker run --network=host  --volume "./tmp/:/config/" --env BRIDGE_TEST_CONFIG_FILE=/config/test.toml bridge-e2e-realnetwork-erc20
 
       - name: Upload logs
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: evm-rpc-tests-logs-${{ github.run_id }}
           path: ./cdk-erigon/logs/evm-rpc-tests.log
@@ -122,7 +122,7 @@ jobs:
 
       - name: Upload logs
         if: failure()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: logs_${{ github.run_id }}
           path: ./kurtosis-cdk/ci_logs

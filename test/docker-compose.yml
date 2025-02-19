@@ -379,3 +379,19 @@ services:
       - ${XDG_DATA_HOME:-~/.local/share}/erigon-grafana:/var/lib/grafana
     restart: unless-stopped
 
+  xlayer-mainnet-seq:
+    container_name: xlayer-seq
+    image: cdk-erigon
+    environment:
+      - CDK_ERIGON_SEQUENCER=1
+    ports:
+      - 6060:6060
+      - 8123:8545
+      - 6900:6900
+      - 9092:9095
+    volumes:
+      - ./mainnet/seq:/home/erigon/data/
+      - ./config/xlayerconfig-mainnet.yaml:/usr/src/app/config.yaml
+    command: >
+      cdk-erigon --http.vhosts=* --http.corsdomain=* --ws --config=/usr/src/app/config.yaml
+
