@@ -181,3 +181,34 @@ func (a *Address) Scan(src interface{}) error {
 func (a Address) Value() (driver.Value, error) {
 	return a[:], nil
 }
+
+// For X Layer
+func CompareAddressess(a, b Address) int {
+	for i := 0; i < len(a); i++ {
+		if a[i] < b[i] {
+			return int(a[i]) - int(b[i])
+		}
+		if a[i] > b[i] {
+			return int(a[i]) - int(b[i])
+		}
+	}
+	return 0
+}
+
+func NewOrderedListOfAddresses(size int) *OrderedList[Address] {
+	return &OrderedList[Address]{
+		list:        make([]Address, 0, size),
+		isOrdered:   false,
+		compareFunc: CompareAddressess,
+	}
+}
+
+func ToListOfString(list *OrderedList[Address]) []string {
+	strs := make([]string, list.Size())
+	for i, addr := range list.Items() {
+		strs[i] = addr.String()
+	}
+	return strs
+}
+
+// End for X Layer

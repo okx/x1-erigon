@@ -193,7 +193,7 @@ var (
 	// RPC
 	HTTPApiKeysFlag = cli.StringFlag{
 		Name: "http.apikeys",
-		Usage: `API keys for the HTTP-RPC server and you can add rate limit to this apikey , format: 
+		Usage: `API keys for the HTTP-RPC server and you can add rate limit to this apikey , format:
 				{"project":"project1","key":"apikey1","timeout":"2023-12-12"}
 				{"project":"project2","key":"apikey2","timeout":"2023-12-12"}
 				{"project":"project3","key":"apikey3","timeout":"2023-12-12","methods":["method1","method2"],"count":1,"bucket":1}`,
@@ -273,29 +273,28 @@ func setTxPoolXLayer(ctx *cli.Context, cfg *ethconfig.DeprecatedTxPoolConfig) {
 	if ctx.IsSet(TxPoolWhiteList.Name) {
 		// Parse the command separated flag
 		addrHexes := libcommon.CliString2Array(ctx.String(TxPoolWhiteList.Name))
-		cfg.WhiteList = make([]string, len(addrHexes))
-		for i, senderHex := range addrHexes {
-			sender := libcommon.HexToAddress(senderHex)
-			cfg.WhiteList[i] = sender.String()
+		cfg.WhiteList = *libcommon.NewOrderedListOfAddresses(len(addrHexes))
+		for _, senderHex := range addrHexes {
+			cfg.WhiteList.Add(libcommon.HexToAddress(senderHex))
 		}
+		cfg.WhiteList.Sort()
 	}
 	if ctx.IsSet(TxPoolBlockedList.Name) {
 		// Parse the command separated flag
 		addrHexes := libcommon.CliString2Array(ctx.String(TxPoolBlockedList.Name))
-		cfg.BlockedList = make([]string, len(addrHexes))
-		for i, senderHex := range addrHexes {
-			sender := libcommon.HexToAddress(senderHex)
-			cfg.BlockedList[i] = sender.String()
+		cfg.BlockedList = *libcommon.NewOrderedListOfAddresses(len(addrHexes))
+		for _, senderHex := range addrHexes {
+			cfg.BlockedList.Add(libcommon.HexToAddress(senderHex))
 		}
+		cfg.BlockedList.Sort()
 	}
 	if ctx.IsSet(TxPoolPackBatchSpecialList.Name) {
 		addrHexes := libcommon.CliString2Array(ctx.String(TxPoolPackBatchSpecialList.Name))
-
-		cfg.FreeClaimGasAddrs = make([]string, len(addrHexes))
-		for i, senderHex := range addrHexes {
-			sender := libcommon.HexToAddress(senderHex)
-			cfg.FreeClaimGasAddrs[i] = sender.String()
+		cfg.FreeClaimGasAddrs = *libcommon.NewOrderedListOfAddresses(len(addrHexes))
+		for _, senderHex := range addrHexes {
+			cfg.FreeClaimGasAddrs.Add(libcommon.HexToAddress(senderHex))
 		}
+		cfg.FreeClaimGasAddrs.Sort()
 	}
 	if ctx.IsSet(TxPoolGasPriceMultiple.Name) {
 		cfg.GasPriceMultiple = ctx.Uint64(TxPoolGasPriceMultiple.Name)
@@ -305,11 +304,11 @@ func setTxPoolXLayer(ctx *cli.Context, cfg *ethconfig.DeprecatedTxPoolConfig) {
 	}
 	if ctx.IsSet(TxPoolFreeGasExAddrs.Name) {
 		addrHexes := libcommon.CliString2Array(ctx.String(TxPoolFreeGasExAddrs.Name))
-		cfg.FreeGasExAddrs = make([]string, len(addrHexes))
-		for i, senderHex := range addrHexes {
-			sender := libcommon.HexToAddress(senderHex)
-			cfg.FreeGasExAddrs[i] = sender.String()
+		cfg.FreeGasExAddrs = *libcommon.NewOrderedListOfAddresses(len(addrHexes))
+		for _, senderHex := range addrHexes {
+			cfg.FreeGasExAddrs.Add(libcommon.HexToAddress(senderHex))
 		}
+		cfg.FreeGasExAddrs.Sort()
 	}
 	if ctx.IsSet(TxPoolFreeGasCountPerAddr.Name) {
 		cfg.FreeGasCountPerAddr = ctx.Uint64(TxPoolFreeGasCountPerAddr.Name)
