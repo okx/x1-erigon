@@ -106,13 +106,13 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&noTxGossip, utils.TxPoolGossipDisableFlag.Name, utils.TxPoolGossipDisableFlag.Value, utils.TxPoolGossipDisableFlag.Usage)
 	rootCmd.Flags().StringSliceVar(&traceSenders, utils.TxPoolTraceSendersFlag.Name, []string{}, utils.TxPoolTraceSendersFlag.Usage)
 	// For X Layer
-	rootCmd.Flags().StringSliceVar(&freeClaimGasAddrs, utils.TxPoolPackBatchSpecialList.Name, ethconfig.DeprecatedDefaultTxPoolConfig.FreeClaimGasAddrs, utils.TxPoolPackBatchSpecialList.Usage)
+	rootCmd.Flags().StringSliceVar(&freeClaimGasAddrs, utils.TxPoolPackBatchSpecialList.Name, common.ToListOfString(&ethconfig.DeprecatedDefaultTxPoolConfig.FreeClaimGasAddrs), utils.TxPoolPackBatchSpecialList.Usage)
 	rootCmd.Flags().Uint64Var(&gasPriceMultiple, utils.TxPoolGasPriceMultiple.Name, ethconfig.DeprecatedDefaultTxPoolConfig.GasPriceMultiple, utils.TxPoolGasPriceMultiple.Usage)
 	rootCmd.Flags().BoolVar(&enableWhiteList, utils.TxPoolEnableWhitelistFlag.Name, ethconfig.DeprecatedDefaultTxPoolConfig.EnableWhitelist, utils.TxPoolEnableWhitelistFlag.Usage)
-	rootCmd.Flags().StringSliceVar(&whiteList, utils.TxPoolWhiteList.Name, ethconfig.DeprecatedDefaultTxPoolConfig.WhiteList, utils.TxPoolWhiteList.Usage)
-	rootCmd.Flags().StringSliceVar(&blockList, utils.TxPoolBlockedList.Name, ethconfig.DeprecatedDefaultTxPoolConfig.BlockedList, utils.TxPoolBlockedList.Usage)
+	rootCmd.Flags().StringSliceVar(&whiteList, utils.TxPoolWhiteList.Name, common.ToListOfString(&ethconfig.DeprecatedDefaultTxPoolConfig.WhiteList), utils.TxPoolWhiteList.Usage)
+	rootCmd.Flags().StringSliceVar(&blockList, utils.TxPoolBlockedList.Name, common.ToListOfString(&ethconfig.DeprecatedDefaultTxPoolConfig.BlockedList), utils.TxPoolBlockedList.Usage)
 	rootCmd.Flags().BoolVar(&enableFreeGasByNonce, utils.TxPoolEnableFreeGasByNonce.Name, ethconfig.DeprecatedDefaultTxPoolConfig.EnableFreeGasByNonce, utils.TxPoolEnableFreeGasByNonce.Usage)
-	rootCmd.Flags().StringSliceVar(&freeGasExAddrs, utils.TxPoolFreeGasExAddrs.Name, ethconfig.DeprecatedDefaultTxPoolConfig.FreeGasExAddrs, utils.TxPoolFreeGasExAddrs.Usage)
+	rootCmd.Flags().StringSliceVar(&freeGasExAddrs, utils.TxPoolFreeGasExAddrs.Name, common.ToListOfString(&ethconfig.DeprecatedDefaultTxPoolConfig.FreeGasExAddrs), utils.TxPoolFreeGasExAddrs.Usage)
 	rootCmd.PersistentFlags().Uint64Var(&freeGasCountPerAddr, utils.TxPoolFreeGasCountPerAddr.Name, ethconfig.DeprecatedDefaultTxPoolConfig.FreeGasCountPerAddr, utils.TxPoolFreeGasCountPerAddr.Usage)
 	rootCmd.PersistentFlags().Uint64Var(&freeGasLimit, utils.TxPoolFreeGasLimit.Name, ethconfig.DeprecatedDefaultTxPoolConfig.FreeGasLimit, utils.TxPoolFreeGasLimit.Usage)
 	rootCmd.Flags().BoolVar(&enableFreeGasList, utils.TxPoolEnableFreeGasList.Name, ethconfig.DeprecatedDefaultTxPoolConfig.EnableFreeGasList, utils.TxPoolEnableFreeGasList.Usage)
@@ -199,28 +199,28 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 	// For X Layer tx pool access
 	ethCfg := &ethconfig.Defaults
 	ethCfg.DeprecatedTxPool.EnableWhitelist = enableWhiteList
-	ethCfg.DeprecatedTxPool.WhiteList = make([]string, len(whiteList))
-	for i, addrHex := range whiteList {
-		addr := common.HexToAddress(addrHex)
-		ethCfg.DeprecatedTxPool.WhiteList[i] = addr.String()
+	ethCfg.DeprecatedTxPool.WhiteList = *common.NewOrderedListOfAddresses(len(whiteList))
+	for _, addrHex := range whiteList {
+		ethCfg.DeprecatedTxPool.WhiteList.Add(common.HexToAddress(addrHex))
 	}
-	ethCfg.DeprecatedTxPool.BlockedList = make([]string, len(blockList))
-	for i, addrHex := range blockList {
-		addr := common.HexToAddress(addrHex)
-		ethCfg.DeprecatedTxPool.BlockedList[i] = addr.String()
+	ethCfg.DeprecatedTxPool.WhiteList.Sort()
+	ethCfg.DeprecatedTxPool.BlockedList = *common.NewOrderedListOfAddresses(len(blockList))
+	for _, addrHex := range blockList {
+		ethCfg.DeprecatedTxPool.BlockedList.Add(common.HexToAddress(addrHex))
 	}
-	ethCfg.DeprecatedTxPool.FreeClaimGasAddrs = make([]string, len(freeClaimGasAddrs))
-	for i, addrHex := range freeClaimGasAddrs {
-		addr := common.HexToAddress(addrHex)
-		ethCfg.DeprecatedTxPool.FreeClaimGasAddrs[i] = addr.String()
+	ethCfg.DeprecatedTxPool.BlockedList.Sort()
+	ethCfg.DeprecatedTxPool.FreeClaimGasAddrs = *common.NewOrderedListOfAddresses(len(freeClaimGasAddrs))
+	for _, addrHex := range freeClaimGasAddrs {
+		ethCfg.DeprecatedTxPool.FreeClaimGasAddrs.Add(common.HexToAddress(addrHex))
 	}
+	ethCfg.DeprecatedTxPool.FreeClaimGasAddrs.Sort()
 	ethCfg.DeprecatedTxPool.GasPriceMultiple = gasPriceMultiple
 	ethCfg.DeprecatedTxPool.EnableFreeGasByNonce = enableFreeGasByNonce
-	ethCfg.DeprecatedTxPool.FreeGasExAddrs = make([]string, len(freeGasExAddrs))
-	for i, addrHex := range freeGasExAddrs {
-		addr := common.HexToAddress(addrHex)
-		ethCfg.DeprecatedTxPool.FreeGasExAddrs[i] = addr.String()
+	ethCfg.DeprecatedTxPool.FreeGasExAddrs = *common.NewOrderedListOfAddresses(len(freeGasExAddrs))
+	for _, addrHex := range freeGasExAddrs {
+		ethCfg.DeprecatedTxPool.FreeGasExAddrs.Add(common.HexToAddress(addrHex))
 	}
+	ethCfg.DeprecatedTxPool.FreeGasExAddrs.Sort()
 	ethCfg.DeprecatedTxPool.FreeGasCountPerAddr = freeGasCountPerAddr
 	ethCfg.DeprecatedTxPool.FreeGasLimit = freeGasLimit
 	ethCfg.DeprecatedTxPool.EnableFreeGasList = enableFreeGasList

@@ -157,7 +157,7 @@ func getNamespaceSuffix(namespace string) (string, error) {
 	return items[len(items)-1], nil
 }
 
-func containsAddress(addresses []string, addr libcommon.Address) bool {
+func containsAddressOldImpl(addresses []string, addr libcommon.Address) bool {
 	for _, item := range addresses {
 		if libcommon.HexToAddress(item) == addr {
 			return true
