@@ -261,7 +261,8 @@ func (m *Mapmutation) doCommit(tx kv.RwTx) error {
 		defer collector.Close()
 		collector.SortAndFlushInBackground(true)
 
-		batchLimit := 1000 // 批量写入 1000 条数据
+		batchLimit := 1000
+		// 预分配批次数组，避免重复分配内存
 		batchKeys := make([][]byte, 0, batchLimit)
 		batchValues := make([][]byte, 0, batchLimit)
 
@@ -272,10 +273,8 @@ func (m *Mapmutation) doCommit(tx kv.RwTx) error {
 
 			// 达到 batchLimit 时写入
 			if len(batchKeys) >= batchLimit {
-				for i := 0; i < batchLimit; i++ {
-					if err := collector.Collect(batchKeys[i], batchValues[i]); err != nil {
-						return err
-					}
+				if err := collectBatch(collector, batchKeys, batchValues); err != nil {
+					return err
 				}
 				batchKeys = batchKeys[:0] // 清空 batch
 				batchValues = batchValues[:0]
@@ -291,19 +290,32 @@ func (m *Mapmutation) doCommit(tx kv.RwTx) error {
 		}
 
 		// 处理剩余未满 batchLimit 的数据
-		for i := range batchKeys {
-			if err := collector.Collect(batchKeys[i], batchValues[i]); err != nil {
+		if len(batchKeys) > 0 {
+			if err := collectBatch(collector, batchKeys, batchValues); err != nil {
 				return err
 			}
 		}
 
-		// 一次性 Load()，减少写入 `tx` 的开销
+		// 一次性执行 Load()，减少 `tx` 写入的开销
 		if err := collector.Load(tx, table, etl.IdentityLoadFunc, etl.TransformArgs{Quit: m.quit}); err != nil {
 			return err
 		}
 	}
 
 	tx.CollectMetrics()
+	return nil
+}
+
+// collectBatch 负责批量收集
+func collectBatch(collector *etl.Collector, keys [][]byte, values [][]byte) error {
+	if len(keys) != len(values) {
+		return fmt.Errorf("keys and values length mismatch")
+	}
+	for i := range keys {
+		if err := collector.Collect(keys[i], values[i]); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
