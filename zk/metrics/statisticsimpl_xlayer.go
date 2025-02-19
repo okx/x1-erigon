@@ -62,7 +62,6 @@ func (l *statisticsInstance) Summary() string {
 	getTxTiming := "GetTxTiming<" + strconv.Itoa(int(l.statistics[GetTxTiming])) + "ms>, "
 	getTxPauseTiming := "GetTxPauseTiming<" + strconv.Itoa(int(l.statistics[GetTxPauseTiming])) + "ms>, "
 	processTxTiming := "ProcessTx<" + strconv.Itoa(int(l.statistics[ProcessingTxTiming])) + "ms>, "
-	//processTxPauseTiming := "ProcessTxPauseTiming<" + strconv.Itoa(int(l.statistics[ProcessingPauseTiming])) + "ms>, "
 	batchCommitDBTiming := "BatchCommitDBTiming<" + strconv.Itoa(int(l.statistics[BatchCommitDBTiming])) + "ms>, "
 	pbStateTiming := "PbStateTiming<" + strconv.Itoa(int(l.statistics[PbStateTiming])) + "ms>, "
 	zkIncIntermediateHashesTiming := "ZkIncIntermediateHashesTiming<" + strconv.Itoa(int(l.statistics[ZkIncIntermediateHashesTiming])) + "ms>, "

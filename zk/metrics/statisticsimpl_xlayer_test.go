@@ -30,7 +30,6 @@ func TestStatisticsInstanceSummary(t *testing.T) {
 				ProcessingInvalidTxCounter:    2,
 				SequencingBatchTiming:         time.Second.Milliseconds() * 20,
 				ProcessingTxTiming:            time.Second.Milliseconds() * 30,
-				ProcessingPauseTiming:         time.Second.Milliseconds() * 10,
 				BatchCommitDBTiming:           time.Second.Milliseconds() * 10,
 				PbStateTiming:                 time.Second.Milliseconds() * 20,
 				ZkIncIntermediateHashesTiming: time.Second.Milliseconds() * 15,

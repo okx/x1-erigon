@@ -19,7 +19,6 @@ const (
 	BatchGas                      logTag = "BatchGas"
 	SequencingBatchTiming         logTag = "SequencingBatchTiming"
 	ProcessingTxTiming            logTag = "ProcessingTxTiming"
-	ProcessingPauseTiming         logTag = "ProcessingPauseTiming"
 	ProcessingInvalidTxCounter    logTag = "ProcessingInvalidTxCounter"
 	FinalizeBatchNumber           logTag = "FinalizeBatchNumber"
 	BatchCommitDBTiming           logTag = "BatchCommitDBTiming"

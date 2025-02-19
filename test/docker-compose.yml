@@ -101,6 +101,7 @@ services:
     environment:
       - NO_SYNC=true
       - MDBX_READAHEAD=false
+      - WRITE_MAP=true
       - CDK_ERIGON_SEQUENCER=1
     ports:
       - 6060:6060
