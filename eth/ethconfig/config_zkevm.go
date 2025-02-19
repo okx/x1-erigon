@@ -44,6 +44,7 @@ type Zk struct {
 	SequencerHaltOnBatchNumber             uint64
 	SequencerResequence                    bool
 	SequencerResequenceHaltOnBatchNumber   uint64
+	SequencerResequenceExternalDatastream  bool
 	SequencerResequenceStrict              bool
 	SequencerResequenceReuseL1InfoIndex    bool
 	ExecutorUrls                           []string

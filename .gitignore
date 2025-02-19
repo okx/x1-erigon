@@ -119,6 +119,7 @@ xlayerconfig-testnet.yaml
 **/cover.out
 **/cover.html
 test/mainnet
+test/external_ds
 test/*.zip
 test/*.tar.gz
 !test/debugToolsConfig.yaml

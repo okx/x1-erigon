@@ -159,6 +159,7 @@ DOCKER_LRP_UNWIND := xlayer-lrp-unwind
 DOCKER_LRP_RESEQUENCE := xlayer-lrp-resequence
 DOCKER_MAINNET_LRP_UNWIND := xlayer-mainnet-lrp-unwind
 DOCKER_MAINNET_LRP_RESEQUENCE := xlayer-mainnet-lrp-resequence
+DOCKER_MAINNET_LRP_RESEQUENCE_WITH_EXTERNAL_DATASTREAM := xlayer-mainnet-lrp-resequence-with-external-datastream
 
 RUN_DOCKER_LRP_STATELESS_EXECUTOR := $(DOCKER_COMPOSE_LRP) up -d $(DOCKER_STATELESS_EXECUTOR)
 RUN_DOCKER_LRP_L1_NETWORK := $(DOCKER_COMPOSE_LRP) up -d $(DOCKER_L1_NETWORK)
@@ -166,6 +167,7 @@ RUN_DOCKER_LRP_UNWIND := $(DOCKER_COMPOSE_LRP) up -d $(DOCKER_LRP_UNWIND)
 RUN_DOCKER_LRP_RESEQUENCE := $(DOCKER_COMPOSE_LRP) up -d $(DOCKER_LRP_RESEQUENCE)
 RUN_DOCKER_MAINNET_LRP_UNWIND := $(DOCKER_COMPOSE_LRP) up -d $(DOCKER_MAINNET_LRP_UNWIND)
 RUN_DOCKER_MAINNET_LRP_RESEQUENCE := $(DOCKER_COMPOSE_LRP) up -d $(DOCKER_MAINNET_LRP_RESEQUENCE)
+RUN_DOCKER_MAINNET_LRP_RESEQUENCE_WITH_EXTERNAL_DATASTREAM := $(DOCKER_COMPOSE_LRP) up -d $(DOCKER_MAINNET_LRP_RESEQUENCE_WITH_EXTERNAL_DATASTREAM)
 
 STOP_LRP := $(DOCKER_COMPOSE_LRP) down --remove-orphans; sleep 3; rm -rf data
 
@@ -223,6 +225,10 @@ lrp-mainnet-post-unwind: build-docker
 	# $(RUN_DOCKER_LRP_STATELESS_EXECUTOR)
 	# sleep 3
 	$(RUN_DOCKER_MAINNET_LRP_RESEQUENCE)
+
+.PHONY: lrp-mainnet-resequence-with-external-ds
+lrp-mainnet-resequence-with-external-ds: build-docker
+	$(RUN_DOCKER_MAINNET_LRP_RESEQUENCE_WITH_EXTERNAL_DATASTREAM)
 
 .PHONY: lrp-mainnet-check
 lrp-mainnet-check: ## Filter logs for LRP & Compute TPS & Check stateroots (configure debugToolsConfig.yaml)
