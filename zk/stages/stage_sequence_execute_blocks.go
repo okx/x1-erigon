@@ -195,6 +195,7 @@ func finaliseBlock(
 		batchContext.sdb.eridb.RollbackBatch()
 		return nil, err
 	}
+	
 	if err = batchContext.sdb.eridb.CommitBatch(); err != nil {
 		return nil, err
 	}
