@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"math/big"
 	"reflect"
+	"sync"
 
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -183,6 +184,11 @@ func (a Address) Value() (driver.Value, error) {
 }
 
 // For X Layer
+
+func convertStringToAddress(s string) Address {
+	return HexToAddress(s)
+}
+
 func CompareAddressess(a, b Address) int {
 	for i := 0; i < len(a); i++ {
 		if a[i] < b[i] {
@@ -198,9 +204,21 @@ func CompareAddressess(a, b Address) int {
 func NewOrderedListOfAddresses(size int) *OrderedList[Address] {
 	return &OrderedList[Address]{
 		list:        make([]Address, 0, size),
+		lock:        sync.RWMutex{},
 		isOrdered:   false,
 		compareFunc: CompareAddressess,
 	}
+}
+
+func NewOrderedListOfAddressesFromStrings(strAddresses []string) *OrderedList[Address] {
+	olist := &OrderedList[Address]{
+		list:        make([]Address, len(strAddresses)),
+		lock:        sync.RWMutex{},
+		isOrdered:   false,
+		compareFunc: CompareAddressess,
+	}
+	AddItemsAndSort(olist, strAddresses, convertStringToAddress)
+	return olist
 }
 
 func ToListOfString(list *OrderedList[Address]) []string {

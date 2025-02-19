@@ -273,28 +273,16 @@ func setTxPoolXLayer(ctx *cli.Context, cfg *ethconfig.DeprecatedTxPoolConfig) {
 	if ctx.IsSet(TxPoolWhiteList.Name) {
 		// Parse the command separated flag
 		addrHexes := libcommon.CliString2Array(ctx.String(TxPoolWhiteList.Name))
-		cfg.WhiteList = *libcommon.NewOrderedListOfAddresses(len(addrHexes))
-		for _, senderHex := range addrHexes {
-			cfg.WhiteList.Add(libcommon.HexToAddress(senderHex))
-		}
-		cfg.WhiteList.Sort()
+		cfg.WhiteList = *libcommon.NewOrderedListOfAddressesFromStrings(addrHexes)
 	}
 	if ctx.IsSet(TxPoolBlockedList.Name) {
 		// Parse the command separated flag
 		addrHexes := libcommon.CliString2Array(ctx.String(TxPoolBlockedList.Name))
-		cfg.BlockedList = *libcommon.NewOrderedListOfAddresses(len(addrHexes))
-		for _, senderHex := range addrHexes {
-			cfg.BlockedList.Add(libcommon.HexToAddress(senderHex))
-		}
-		cfg.BlockedList.Sort()
+		cfg.BlockedList = *libcommon.NewOrderedListOfAddressesFromStrings(addrHexes)
 	}
 	if ctx.IsSet(TxPoolPackBatchSpecialList.Name) {
 		addrHexes := libcommon.CliString2Array(ctx.String(TxPoolPackBatchSpecialList.Name))
-		cfg.FreeClaimGasAddrs = *libcommon.NewOrderedListOfAddresses(len(addrHexes))
-		for _, senderHex := range addrHexes {
-			cfg.FreeClaimGasAddrs.Add(libcommon.HexToAddress(senderHex))
-		}
-		cfg.FreeClaimGasAddrs.Sort()
+		cfg.FreeClaimGasAddrs = *libcommon.NewOrderedListOfAddressesFromStrings(addrHexes)
 	}
 	if ctx.IsSet(TxPoolGasPriceMultiple.Name) {
 		cfg.GasPriceMultiple = ctx.Uint64(TxPoolGasPriceMultiple.Name)
@@ -304,11 +292,7 @@ func setTxPoolXLayer(ctx *cli.Context, cfg *ethconfig.DeprecatedTxPoolConfig) {
 	}
 	if ctx.IsSet(TxPoolFreeGasExAddrs.Name) {
 		addrHexes := libcommon.CliString2Array(ctx.String(TxPoolFreeGasExAddrs.Name))
-		cfg.FreeGasExAddrs = *libcommon.NewOrderedListOfAddresses(len(addrHexes))
-		for _, senderHex := range addrHexes {
-			cfg.FreeGasExAddrs.Add(libcommon.HexToAddress(senderHex))
-		}
-		cfg.FreeGasExAddrs.Sort()
+		cfg.FreeGasExAddrs = *libcommon.NewOrderedListOfAddressesFromStrings(addrHexes)
 	}
 	if ctx.IsSet(TxPoolFreeGasCountPerAddr.Name) {
 		cfg.FreeGasCountPerAddr = ctx.Uint64(TxPoolFreeGasCountPerAddr.Name)
