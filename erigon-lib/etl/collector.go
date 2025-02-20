@@ -206,7 +206,6 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 
 	// 批量删除操作
 	batchDelete := func(db kv.RwTx, keys [][]byte, bucket string) error {
-		// 使用现有的游标进行删除
 		for _, key := range keys {
 			if err := cursor.Delete(key); err != nil {
 				return fmt.Errorf("batch delete failed: %w", err)
@@ -217,7 +216,6 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 
 	// 批量 put 操作
 	batchPut := func(db kv.RwTx, keys [][]byte, values [][]byte, isDupSort bool, bucket string) error {
-		// 使用现有的游标进行 batch put
 		for i := 0; i < len(keys); i++ {
 			if isDupSort {
 				if err := cursor.(kv.RwCursorDupSort).AppendDup(keys[i], values[i]); err != nil {
@@ -232,6 +230,7 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 		return nil
 	}
 
+	// 加载数据并标记删除
 	loadNextFunc := func(_, k, v []byte) error {
 		if i == 0 {
 			isEndOfBucket := lastKey == nil || bytes.Compare(lastKey, k) == -1
@@ -257,33 +256,35 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 			if canUseAppend {
 				return nil
 			}
-			batchDeletes = append(batchDeletes, k) // 收集删除操作
-			// 批量删除优化
+			// 缓存删除操作
+			batchDeletes = append(batchDeletes, k)
 			if len(batchDeletes) >= batchLimit {
+				// 延迟执行批量删除
 				if err := batchDelete(db, batchDeletes, toBucket); err != nil {
 					return err
 				}
-				batchDeletes = batchDeletes[:0]
+				batchDeletes = batchDeletes[:0] // 清空缓存
 			}
 			return nil
 		}
 
-		// 批量写入
+		// 批量写入操作
 		if canUseAppend {
 			batchKeys = append(batchKeys, k)
 			batchValues = append(batchValues, v)
 
 			if len(batchKeys) >= batchLimit {
+				// 批量 put
 				if err := batchPut(db, batchKeys, batchValues, isDupSort, toBucket); err != nil {
 					return err
 				}
-				batchKeys = batchKeys[:0]
+				batchKeys = batchKeys[:0] // 清空缓存
 				batchValues = batchValues[:0]
 			}
 			return nil
 		}
 
-		// 默认执行 Put
+		// 默认 put 操作
 		if err := cursor.Put(k, v); err != nil {
 			return fmt.Errorf("%s: put: k=%x, %w", c.logPrefix, k, err)
 		}
@@ -295,7 +296,7 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 		return loadFunc(k, v, currentTable, loadNextFunc)
 	}
 
-	// 加载并合并
+	// 执行加载并合并
 	if err := mergeSortFiles(c.logPrefix, c.dataProviders, simpleLoad, args, c.buf); err != nil {
 		return fmt.Errorf("loadIntoTable %s: %w", toBucket, err)
 	}
