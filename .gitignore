@@ -122,7 +122,6 @@ test/mainnet
 test/external_ds
 test/*.zip
 test/*.tar.gz
-!test/debugToolsConfig.yaml
 
 datadir
 zk/tests/unwinds/datastream/hermez-dynamic-integration8-datastream

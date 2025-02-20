@@ -158,16 +158,18 @@ DOCKER_COMPOSE_LRP := docker compose -f docker-compose-lrp.yml
 DOCKER_LRP_UNWIND := xlayer-lrp-unwind
 DOCKER_LRP_RESEQUENCE := xlayer-lrp-resequence
 DOCKER_MAINNET_LRP_UNWIND := xlayer-mainnet-lrp-unwind
+DOCKER_MAINNET_LRP_UNWIND_CONTAINER := xlayer-mainnet-lrp-unwind
 DOCKER_MAINNET_LRP_RESEQUENCE := xlayer-mainnet-lrp-resequence
 DOCKER_MAINNET_LRP_RESEQUENCE_WITH_EXTERNAL_DATASTREAM := xlayer-mainnet-lrp-resequence-with-external-datastream
+DOCKER_MAINNET_LRP_RESEQUENCE_CONTAINER := xlayer-mainnet-lrp-resequence
 
 RUN_DOCKER_LRP_STATELESS_EXECUTOR := $(DOCKER_COMPOSE_LRP) up -d $(DOCKER_STATELESS_EXECUTOR)
 RUN_DOCKER_LRP_L1_NETWORK := $(DOCKER_COMPOSE_LRP) up -d $(DOCKER_L1_NETWORK)
 RUN_DOCKER_LRP_UNWIND := $(DOCKER_COMPOSE_LRP) up -d $(DOCKER_LRP_UNWIND)
 RUN_DOCKER_LRP_RESEQUENCE := $(DOCKER_COMPOSE_LRP) up -d $(DOCKER_LRP_RESEQUENCE)
 RUN_DOCKER_MAINNET_LRP_UNWIND := $(DOCKER_COMPOSE_LRP) up -d $(DOCKER_MAINNET_LRP_UNWIND)
-RUN_DOCKER_MAINNET_LRP_RESEQUENCE := $(DOCKER_COMPOSE_LRP) up -d $(DOCKER_MAINNET_LRP_RESEQUENCE)
-RUN_DOCKER_MAINNET_LRP_RESEQUENCE_WITH_EXTERNAL_DATASTREAM := $(DOCKER_COMPOSE_LRP) up -d $(DOCKER_MAINNET_LRP_RESEQUENCE_WITH_EXTERNAL_DATASTREAM)
+RUN_DOCKER_MAINNET_LRP_RESEQUENCE := $(DOCKER_COMPOSE_LRP) --profile internal-ds up -d $(DOCKER_MAINNET_LRP_RESEQUENCE)
+RUN_DOCKER_MAINNET_LRP_RESEQUENCE_WITH_EXTERNAL_DATASTREAM := $(DOCKER_COMPOSE_LRP) --profile external-ds up -d $(DOCKER_MAINNET_LRP_RESEQUENCE_WITH_EXTERNAL_DATASTREAM)
 
 STOP_LRP := $(DOCKER_COMPOSE_LRP) down --remove-orphans; sleep 3; rm -rf data
 
@@ -176,70 +178,163 @@ RESEQUENCE_LOG_FILE := resequence.log
 RESEQUENCE_FILTERED_LOG_FILE := resequence_filtered.log
 BLOCKHASHES_LOG_FILE := blockhashes.log
 
-.PHONY: configure-lrp
-configure-lrp:
+.PHONY: lrp-config
+lrp-config:
 	@read -p "Enter fromBatchNumber: " FROM_BATCH_NO; \
 	read -p "Enter toBatchNumber: " TO_BATCH_NO; \
+	read -p "Use external datastream? (y/n): " USE_EXTERNAL_DS; \
+	UNWIND_BATCH_NO=$$((FROM_BATCH_NO - 1)); \
+	if [ "$$USE_EXTERNAL_DS" = "y" ]; then \
+		EXTERNAL_DS="true"; \
+	else \
+		EXTERNAL_DS="false"; \
+	fi; \
+	if [ "$(shell uname)" = "Darwin" ]; then \
+		sed -i '' "s/--unwind-batch-no=[0-9]*/--unwind-batch-no=$$UNWIND_BATCH_NO/" docker-compose-lrp.yml; \
+		sed -i '' "s/--zkevm.sequencer-resequence-halt-on-batch-number=[0-9]*/--zkevm.sequencer-resequence-halt-on-batch-number=$$TO_BATCH_NO/" docker-compose-lrp.yml; \
+		sed -i '' "s/--zkevm.sequencer-resequence-external-datastream=\(true\|false\)/--zkevm.sequencer-resequence-external-datastream=$$EXTERNAL_DS/" docker-compose-lrp.yml; \
+	else \
+		sed -i "s/--unwind-batch-no=[0-9]*/--unwind-batch-no=$$UNWIND_BATCH_NO/" docker-compose-lrp.yml; \
+		sed -i "s/--zkevm.sequencer-resequence-halt-on-batch-number=[0-9]*/--zkevm.sequencer-resequence-halt-on-batch-number=$$TO_BATCH_NO/" docker-compose-lrp.yml; \
+		sed -i "s/--zkevm.sequencer-resequence-external-datastream=\(true\|false\)/--zkevm.sequencer-resequence-external-datastream=$$EXTERNAL_DS/" docker-compose-lrp.yml; \
+	fi; \
+	if [ ! -f lrp.config.yaml ]; then \
+		echo "fromBatchNumber: $$FROM_BATCH_NO" > lrp.config.yaml; \
+		echo "toBatchNumber: $$TO_BATCH_NO" >> lrp.config.yaml; \
+		echo "useExternalDatastream: $$EXTERNAL_DS" >> lrp.config.yaml; \
+	else \
+		if [ "$(shell uname)" = "Darwin" ]; then \
+			sed -i '' "s/^fromBatchNumber:.*/fromBatchNumber: $$FROM_BATCH_NO/" lrp.config.yaml; \
+			sed -i '' "s/^toBatchNumber:.*/toBatchNumber: $$TO_BATCH_NO/" lrp.config.yaml; \
+			sed -i '' "s/^useExternalDatastream:.*/useExternalDatastream: $$EXTERNAL_DS/" lrp.config.yaml; \
+			if ! grep -q "^fromBatchNumber:" lrp.config.yaml; then echo "fromBatchNumber: $$FROM_BATCH_NO" >> lrp.config.yaml; fi; \
+			if ! grep -q "^toBatchNumber:" lrp.config.yaml; then echo "toBatchNumber: $$TO_BATCH_NO" >> lrp.config.yaml; fi; \
+			if ! grep -q "^useExternalDatastream:" lrp.config.yaml; then echo "useExternalDatastream: $$EXTERNAL_DS" >> lrp.config.yaml; fi; \
+		else \
+			sed -i "s/^fromBatchNumber:.*/fromBatchNumber: $$FROM_BATCH_NO/" lrp.config.yaml; \
+			sed -i "s/^toBatchNumber:.*/toBatchNumber: $$TO_BATCH_NO/" lrp.config.yaml; \
+			sed -i "s/^useExternalDatastream:.*/useExternalDatastream: $$EXTERNAL_DS/" lrp.config.yaml; \
+			if ! grep -q "^fromBatchNumber:" lrp.config.yaml; then echo "fromBatchNumber: $$FROM_BATCH_NO" >> lrp.config.yaml; fi; \
+			if ! grep -q "^toBatchNumber:" lrp.config.yaml; then echo "toBatchNumber: $$TO_BATCH_NO" >> lrp.config.yaml; fi; \
+			if ! grep -q "^useExternalDatastream:" lrp.config.yaml; then echo "useExternalDatastream: $$EXTERNAL_DS" >> lrp.config.yaml; fi; \
+		fi; \
+	fi
+
+.PHONY: lrp-config-apply
+lrp-config-apply:
+	@FROM_BATCH_NO=$$(awk '/^fromBatchNumber:/ {print $$2}' lrp.config.yaml); \
+	TO_BATCH_NO=$$(awk '/^toBatchNumber:/ {print $$2}' lrp.config.yaml); \
+	EXTERNAL_DS=$$(awk '/^useExternalDatastream:/ {print $$2}' lrp.config.yaml); \
 	UNWIND_BATCH_NO=$$((FROM_BATCH_NO - 1)); \
 	if [ "$(shell uname)" = "Darwin" ]; then \
 		sed -i '' "s/--unwind-batch-no=[0-9]*/--unwind-batch-no=$$UNWIND_BATCH_NO/" docker-compose-lrp.yml; \
 		sed -i '' "s/--zkevm.sequencer-resequence-halt-on-batch-number=[0-9]*/--zkevm.sequencer-resequence-halt-on-batch-number=$$TO_BATCH_NO/" docker-compose-lrp.yml; \
+		sed -i '' "s/--zkevm.sequencer-resequence-external-datastream=\(true\|false\)/--zkevm.sequencer-resequence-external-datastream=$$EXTERNAL_DS/" docker-compose-lrp.yml; \
 	else \
 		sed -i "s/--unwind-batch-no=[0-9]*/--unwind-batch-no=$$UNWIND_BATCH_NO/" docker-compose-lrp.yml; \
 		sed -i "s/--zkevm.sequencer-resequence-halt-on-batch-number=[0-9]*/--zkevm.sequencer-resequence-halt-on-batch-number=$$TO_BATCH_NO/" docker-compose-lrp.yml; \
+		sed -i "s/--zkevm.sequencer-resequence-external-datastream=\(true\|false\)/--zkevm.sequencer-resequence-external-datastream=$$EXTERNAL_DS/" docker-compose-lrp.yml; \
 	fi
 
 .PHONY: lrp-run
-lrp-run: build-docker configure-lrp
+lrp-run: build-docker lrp-config-apply
 	$(RUN_DOCKER_LRP_L1_NETWORK)
 	sleep 3
 	$(RUN_DOCKER_LRP_UNWIND)
-	docker wait $(DOCKER_LRP_UNWIND)
-	docker logs $(DOCKER_LRP_UNWIND) > $(UNWIND_LOG_FILE) 2>&1
+	docker wait $(DOCKER_LRP_UNWIND_CONTAINER)
+	docker logs $(DOCKER_LRP_UNWIND_CONTAINER) > $(UNWIND_LOG_FILE) 2>&1
 	$(RUN_DOCKER_LRP_RESEQUENCE)
 
-.PHONY: lrp-check
-lrp-check: ## Filter logs for LRP & Compute TPS & Check stateroots (configure debugToolsConfig.yaml)
-	docker logs $(DOCKER_LRP_RESEQUENCE) > $(RESEQUENCE_LOG_FILE) 2>&1
-	docker logs $(DOCKER_LRP_RESEQUENCE) 2>&1 | grep "\[5/13 Execution\]" > $(RESEQUENCE_FILTERED_LOG_FILE)
+.PHONY: lrp-tps
+lrp-tps: ## Filter logs for LRP & Compute TPS
+	docker logs $(DOCKER_LRP_RESEQUENCE_CONTAINER) > $(RESEQUENCE_LOG_FILE) 2>&1
+	docker logs $(DOCKER_LRP_RESEQUENCE_CONTAINER) 2>&1 | grep "\[5/13 Execution\]" > $(RESEQUENCE_FILTERED_LOG_FILE)
 	python process_log.py $(RESEQUENCE_FILTERED_LOG_FILE)
-	go run ../zk/debug_tools/rpc-blockhashes-compare/main.go
 
 .PHONY: lrp-mainnet
-lrp-mainnet: build-docker configure-lrp
+lrp-mainnet: build-docker lrp-config-apply
 	$(RUN_DOCKER_MAINNET_LRP_UNWIND)
-	docker wait $(DOCKER_MAINNET_LRP_UNWIND)
-	docker logs $(DOCKER_MAINNET_LRP_UNWIND) > $(UNWIND_LOG_FILE) 2>&1
+	docker wait $(DOCKER_MAINNET_LRP_UNWIND_CONTAINER)
+	docker logs $(DOCKER_MAINNET_LRP_UNWIND_CONTAINER) > $(UNWIND_LOG_FILE) 2>&1
 	# $(RUN_DOCKER_LRP_STATELESS_EXECUTOR)
 	# sleep 3
-	$(RUN_DOCKER_MAINNET_LRP_RESEQUENCE)
+	@EXTERNAL_DS=$$(awk '/^useExternalDatastream:/ {print $$2}' lrp.config.yaml); \
+	if [ "$$EXTERNAL_DS" = "true" ]; then \
+		$(RUN_DOCKER_MAINNET_LRP_RESEQUENCE_WITH_EXTERNAL_DATASTREAM); \
+	else \
+		$(RUN_DOCKER_MAINNET_LRP_RESEQUENCE); \
+	fi
 
 .PHONY: lrp-mainnet-unwind
-lrp-mainnet-unwind: build-docker configure-lrp
+lrp-mainnet-unwind: build-docker lrp-config-apply
 	$(RUN_DOCKER_MAINNET_LRP_UNWIND)
-	docker wait $(DOCKER_MAINNET_LRP_UNWIND)
-	docker logs $(DOCKER_MAINNET_LRP_UNWIND) > $(UNWIND_LOG_FILE) 2>&1
+	docker wait $(DOCKER_MAINNET_LRP_UNWIND_CONTAINER)
+	docker logs $(DOCKER_MAINNET_LRP_UNWIND_CONTAINER) > $(UNWIND_LOG_FILE) 2>&1
 
-.PHONY: lrp-mainnet-post-unwind
-lrp-mainnet-post-unwind: build-docker
+.PHONY: lrp-mainnet-resequence
+lrp-mainnet-resequence: build-docker lrp-config-apply
 	# $(RUN_DOCKER_LRP_STATELESS_EXECUTOR)
 	# sleep 3
-	$(RUN_DOCKER_MAINNET_LRP_RESEQUENCE)
+	@EXTERNAL_DS=$$(awk '/^useExternalDatastream:/ {print $$2}' lrp.config.yaml); \
+	if [ "$$EXTERNAL_DS" = "true" ]; then \
+		$(RUN_DOCKER_MAINNET_LRP_RESEQUENCE_WITH_EXTERNAL_DATASTREAM); \
+	else \
+		$(RUN_DOCKER_MAINNET_LRP_RESEQUENCE); \
+	fi
 
-.PHONY: lrp-mainnet-resequence-with-external-ds
-lrp-mainnet-resequence-with-external-ds: build-docker
-	$(RUN_DOCKER_MAINNET_LRP_RESEQUENCE_WITH_EXTERNAL_DATASTREAM)
+.PHONY: lrp-mainnet-resequence-pause
+lrp-mainnet-resequence-pause:
+	@EXTERNAL_DS=$$(awk '/^useExternalDatastream:/ {print $$2}' lrp.config.yaml); \
+	if [ "$$EXTERNAL_DS" = "true" ]; then \
+		docker stop $(DOCKER_MAINNET_LRP_RESEQUENCE_CONTAINER) --time 600; \
+	else \
+		echo "Warning: useExternalDatastream is set to false, batches data will be lost"; \
+	fi
 
-.PHONY: lrp-mainnet-check
-lrp-mainnet-check: ## Filter logs for LRP & Compute TPS & Check stateroots (configure debugToolsConfig.yaml)
-	docker logs $(DOCKER_MAINNET_LRP_RESEQUENCE) > $(RESEQUENCE_LOG_FILE) 2>&1
-	docker logs $(DOCKER_MAINNET_LRP_RESEQUENCE) 2>&1 | grep "\[5/13 Execution\]" > $(RESEQUENCE_FILTERED_LOG_FILE)
+.PHONY: lrp-mainnet-data-refresh
+lrp-mainnet-data-refresh:
+	@SRC_PATH=$$(awk '/^srcMainnetDataPath:/ {print $$2}' lrp.config.yaml); \
+	if [ -z "$$SRC_PATH" ]; then \
+		echo "Error: srcMainnetDataPath not found in lrp.config.yaml"; \
+		echo "Please add 'srcMainnetDataPath: /path/to/mainnet/data' to lrp.config.yaml"; \
+		exit 1; \
+	fi; \
+	EXPANDED_PATH=$$(echo "$$SRC_PATH" | envsubst); \
+	if [ ! -d "$$EXPANDED_PATH" ]; then \
+		echo "Error: Source directory $$EXPANDED_PATH does not exist"; \
+		exit 1; \
+	fi; \
+	mkdir -p mainnet; \
+	rm -rf mainnet/seq; \
+	cp -r "$$EXPANDED_PATH" mainnet/seq
+
+.PHONY: lrp-mainnet-data-compact
+lrp-mainnet-data-compact:
+	@if [ ! -f ./mainnet/seq/chaindata/mdbx.dat ]; then \
+		echo "Error: Database file not found at ./mainnet/seq/chaindata/mdbx.dat"; \
+		exit 1; \
+	fi; \
+	mkdir -p tmp; \
+	echo "Compacting database file..."; \
+	../build/bin/mdbx_copy -c ./mainnet/seq/chaindata/mdbx.dat ./tmp/mdbx.dat; \
+	if [ $$? -eq 0 ]; then \
+		echo "Replacing original database file with compacted version..."; \
+		mv ./mainnet/seq/chaindata/mdbx.dat ./mainnet/seq/chaindata/mdbx.dat.bak; \
+		mv ./tmp/mdbx.dat ./mainnet/seq/chaindata/mdbx.dat; \
+		rm -f ./mainnet/seq/chaindata/mdbx.dat.bak; \
+		rm -rf tmp; \
+		echo "Database compaction completed successfully."; \
+	else \
+		echo "Error: Database compaction failed"; \
+		rm -rf tmp; \
+		exit 1; \
+	fi
+
+.PHONY: lrp-mainnet-tps
+lrp-mainnet-tps: # Filter logs for LRP & Compute TPS
+	docker logs $(DOCKER_MAINNET_LRP_RESEQUENCE_CONTAINER) > $(RESEQUENCE_LOG_FILE) 2>&1
+	docker logs $(DOCKER_MAINNET_LRP_RESEQUENCE_CONTAINER) 2>&1 | grep "\[5/13 Execution\]" > $(RESEQUENCE_FILTERED_LOG_FILE)
 	python process_log.py $(RESEQUENCE_FILTERED_LOG_FILE)
-	go run ../zk/debug_tools/rpc-blockhashes-compare/main.go
-
-.PHONY: watch-blockhashes
-watch-blockhashes:
-	watch -n 300 'echo "\n[$(shell date "+%Y-%m-%d %H:%M:%S")]" >> $(BLOCKHASHES_LOG_FILE) && go run ../zk/debug_tools/rpc-blockhashes-compare/main.go | tee -a $(BLOCKHASHES_LOG_FILE)'
 
 .PHONY: lrp-stop
 lrp-stop:
