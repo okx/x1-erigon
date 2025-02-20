@@ -463,7 +463,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 	}
 	db.path = opts.path
 	addToPathDbMap(opts.path, db)
-	opts.Print()
+	opts.debug()
 	return db, nil
 }
 
