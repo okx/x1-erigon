@@ -198,7 +198,7 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 	defer logEvery.Stop()
 
 	// 批量处理配置
-	batchLimit := 1000
+	batchLimit := 2000
 	batchKeys := make([][]byte, 0, batchLimit)
 	batchValues := make([][]byte, 0, batchLimit)
 	batchDeletes := make([][]byte, 0, batchLimit)
@@ -230,7 +230,7 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 		return nil
 	}
 
-	// 加载数据并标记删除
+	// 并行处理加载
 	loadNextFunc := func(_, k, v []byte) error {
 		if i == 0 {
 			isEndOfBucket := lastKey == nil || bytes.Compare(lastKey, k) == -1
@@ -256,14 +256,15 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 			if canUseAppend {
 				return nil
 			}
-			// 缓存删除操作
 			batchDeletes = append(batchDeletes, k)
 			if len(batchDeletes) >= batchLimit {
-				// 延迟执行批量删除
-				if err := batchDelete(db, batchDeletes, toBucket); err != nil {
-					return err
-				}
-				batchDeletes = batchDeletes[:0] // 清空缓存
+				// 批量删除操作
+				go func() {
+					if err := batchDelete(db, batchDeletes, toBucket); err != nil {
+						c.logger.Log(c.logLvl, fmt.Sprintf("[%s] ETL [2/2] batch delete failed", c.logPrefix), err)
+					}
+				}()
+				batchDeletes = batchDeletes[:0]
 			}
 			return nil
 		}
@@ -274,11 +275,12 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 			batchValues = append(batchValues, v)
 
 			if len(batchKeys) >= batchLimit {
-				// 批量 put
-				if err := batchPut(db, batchKeys, batchValues, isDupSort, toBucket); err != nil {
-					return err
-				}
-				batchKeys = batchKeys[:0] // 清空缓存
+				go func() {
+					if err := batchPut(db, batchKeys, batchValues, isDupSort, toBucket); err != nil {
+						c.logger.Log(c.logLvl, fmt.Sprintf("[%s] ETL [2/2] batch put failed", c.logPrefix), err)
+					}
+				}()
+				batchKeys = batchKeys[:0]
 				batchValues = batchValues[:0]
 			}
 			return nil
