@@ -25,12 +25,27 @@ const (
 	PbStateTiming                 logTag = "PbStateTiming"
 	ZkIncIntermediateHashesTiming logTag = "ZkIncIntermediateHashesTiming"
 	FinaliseBlockWriteTiming      logTag = "FinaliseBlockWriteTiming"
+
+	ZKHashAccountCount logTag = "ZKHashAccountCount"
+	ZKHashStoreCount   logTag = "ZKHashStoreCount"
+	ZKHashCodeCount    logTag = "ZKHashCodeCount"
+
+	ZKHashSMTDeleteByNodeKey logTag = "ZKHashSMTDeleteByNodeKey"
+	ZKHashSMTDeleteHashKey   logTag = "ZKHashSMTDeleteHashKey"
+	ZKHashSMTInsertKey       logTag = "ZKHashSMTInsertKey"
+	ZKHashSMTGetKey          logTag = "ZKHashSMTGetKey"
+
+	ZKHashSMTDeleteByNodeKeyTiming logTag = "ZKHashSMTDeleteByNodeKeyTiming"
+	ZKHashSMTDeleteHashKeyTiming   logTag = "ZKHashSMTDeleteHashKeyTiming"
+	ZKHashSMTInsertKeyTiming       logTag = "ZKHashSMTInsertKeyTiming"
+	ZKHashSMTGetKeyTiming          logTag = "ZKHashSMTGetKeyTiming"
 )
 
 type Statistics interface {
 	CumulativeCounting(tag logTag)
 	CumulativeValue(tag logTag, value int64)
 	CumulativeTiming(tag logTag, duration time.Duration)
+	CumulativeMicroTiming(tag logTag, duration time.Duration)
 	SetTag(tag logTag, value string)
 	GetTag(tag logTag) string
 	GetStatistics(tag logTag) int64

@@ -385,13 +385,14 @@ services:
     environment:
       - CDK_ERIGON_SEQUENCER=1
       - WRITE_MAP=true
-      - NO_MEMSTAT=false
-      - WRITE_MAP=false
-      - MDBX_DIRTY_SPACE_MB=16
-      - NO_SYNC=false
-      - MERGE_THRESHOLD=3
-      - MDBX_READAHEAD=false
-      - DISCARD_HISTORY=false
+#      - NO_SYNC=true
+#      - NO_MEMSTAT=false
+#      - WRITE_MAP=false
+#      - MDBX_DIRTY_SPACE_MB=16
+#      - NO_SYNC=false
+#      - MERGE_THRESHOLD=3
+#      - MDBX_READAHEAD=false
+#      - DISCARD_HISTORY=false
 #      - SLOW_TX=10s
 
     ports:

@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"fmt"
 	"strconv"
 	"sync"
 	"time"
@@ -37,6 +38,10 @@ func (l *statisticsInstance) CumulativeTiming(tag logTag, duration time.Duration
 	l.statistics[tag] += duration.Milliseconds()
 }
 
+func (l *statisticsInstance) CumulativeMicroTiming(tag logTag, duration time.Duration) {
+	l.statistics[tag] += duration.Microseconds()
+}
+
 func (l *statisticsInstance) SetTag(tag logTag, value string) {
 	l.tags[tag] = value
 }
@@ -66,12 +71,14 @@ func (l *statisticsInstance) Summary() string {
 	pbStateTiming := "PbStateTiming<" + strconv.Itoa(int(l.statistics[PbStateTiming])) + "ms>, "
 	zkIncIntermediateHashesTiming := "ZkIncIntermediateHashesTiming<" + strconv.Itoa(int(l.statistics[ZkIncIntermediateHashesTiming])) + "ms>, "
 	finaliseBlockWriteTiming := "FinaliseBlockWriteTiming<" + strconv.Itoa(int(l.statistics[FinaliseBlockWriteTiming])) + "ms>, "
-	batchCloseReason := "BatchCloseReason<" + l.tags[BatchCloseReason] + ">"
+	batchCloseReason := "BatchCloseReason<" + l.tags[BatchCloseReason] + ">,"
+	zkHashAccCount := "zkHashAccCount<acc:" + strconv.Itoa(int(l.statistics[ZKHashAccountCount])) + ", store:" + strconv.Itoa(int(l.statistics[ZKHashStoreCount])) + ", code:" + strconv.Itoa(int(l.statistics[ZKHashCodeCount])) + ">, "
+	zkHashSMTCount := "zkHashSMTCount<delByNode:" + strconv.Itoa(int(l.statistics[ZKHashSMTDeleteByNodeKey])) + "-" + fmt.Sprintf("%.0f", float64(l.statistics[ZKHashSMTDeleteByNodeKeyTiming])/1000.0) + "ms, delHash:" + strconv.Itoa(int(l.statistics[ZKHashSMTDeleteHashKey])) + "-" + fmt.Sprintf("%.0f", float64(l.statistics[ZKHashSMTDeleteHashKeyTiming])/1000.0) + "ms, ins:" + strconv.Itoa(int(l.statistics[ZKHashSMTInsertKey])) + "-" + fmt.Sprintf("%.0f", float64(l.statistics[ZKHashSMTInsertKeyTiming])/1000.0) + "ms, get:" + strconv.Itoa(int(l.statistics[ZKHashSMTGetKey])) + "-" + fmt.Sprintf("%.0f", float64(l.statistics[ZKHashSMTGetKeyTiming])/1000.0) + "ms>"
 
 	result := batch + totalDuration + gasUsed + blockCount + tx + getTxPause +
 		reprocessTx + gasOverTx + zkOverflowBlock + invalidTx + sequencingBatchTiming + getTxTiming + processTxTiming + getTxPauseTiming + pbStateTiming +
 		zkIncIntermediateHashesTiming + finaliseBlockWriteTiming + batchCommitDBTiming +
-		batchCloseReason
+		batchCloseReason + zkHashAccCount + zkHashSMTCount
 	log.Info(result)
 	l.resetStatistics()
 	return result
