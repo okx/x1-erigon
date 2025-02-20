@@ -1076,12 +1076,36 @@ func (tx *MdbxTx) Commit() error {
 		return nil
 	}
 
-	// Use a goroutine for background cleanup tasks to avoid blocking the commit operation
+	var wg sync.WaitGroup
+	wg.Add(1) // 为 CollectMetrics 增加一个等待组
+
+	// 启动独立的线程来执行 CollectMetrics
+	go func() {
+		defer wg.Done() // 确保 CollectMetrics 执行完后会调用 Done
+		tx.CollectMetrics()
+	}()
+
+	//// 在提交之前进行相关的调试信息收集
+	//if debug.SlowCommit() > 0 || debug.BigRoTxKb() > 0 || debug.BigRwTxKb() > 0 {
+	//	go tx.PrintDebugInfo()
+	//}
+
+	// 提交事务
+	latency, err := tx.tx.Commit()
+	if err != nil {
+		return fmt.Errorf("label: %s, %w", tx.db.opts.label, err)
+	}
+
+	// 等待 CollectMetrics 完成
+	wg.Wait()
+
+	// 事务成功提交后，执行清理操作
 	defer func() {
+		// 清理 tx.tx 和相关资源
 		tx.tx = nil
 		tx.db.trackTxEnd()
 
-		// Background release of tx limiter to prevent blocking
+		// 异步执行剩余资源释放和关闭
 		go func() {
 			if tx.readOnly {
 				tx.db.readTxLimiter.Release(1)
@@ -1089,41 +1113,21 @@ func (tx *MdbxTx) Commit() error {
 				tx.db.writeTxLimiter.Release(1)
 				runtime.UnlockOSThread()
 			}
-		}()
-
-		// Background leak detection removal
-		go func() {
 			tx.db.leakDetector.Del(tx.id)
+			tx.closeCursors()
 		}()
-
-		// Close cursors asynchronously to avoid blocking the commit
-		go tx.closeCursors()
 	}()
 
-	//// If debug metrics are enabled, collect them asynchronously
-	//if debug.SlowCommit() > 0 || debug.BigRoTxKb() > 0 || debug.BigRwTxKb() > 0 {
-	//	go tx.PrintDebugInfo()
-	//}
-
-	tx.CollectMetrics()
-
-	// Commit the transaction
-	latency, err := tx.tx.Commit()
-	if err != nil {
-		return fmt.Errorf("label: %s, %w", tx.db.opts.label, err)
-	}
-
-	// Optimized metrics collection: moved to goroutine to avoid blocking the commit
+	// 记录数据库相关的指标
 	if tx.db.opts.label == kv.ChainDB {
 		go func() {
 			kv.DbCommitPreparation.Observe(latency.Preparation.Seconds())
-			// kv.DbCommitAudit.Update(latency.Audit.Seconds())
 			kv.DbCommitWrite.Observe(latency.Write.Seconds())
 			kv.DbCommitSync.Observe(latency.Sync.Seconds())
 			kv.DbCommitEnding.Observe(latency.Ending.Seconds())
 			kv.DbCommitTotal.Observe(latency.Whole.Seconds())
 
-			// Consider whether GC details need to be included
+			// 可选的 GC 相关指标
 			// kv.DbGcWorkPnlMergeTime.Update(latency.GCDetails.WorkPnlMergeTime.Seconds())
 			// kv.DbGcWorkPnlMergeVolume.Set(uint64(latency.GCDetails.WorkPnlMergeVolume))
 			// kv.DbGcWorkPnlMergeCalls.Set(uint64(latency.GCDetails.WorkPnlMergeCalls))
