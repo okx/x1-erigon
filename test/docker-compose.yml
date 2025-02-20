@@ -185,58 +185,6 @@ services:
     command: >
       cdk-erigon --http.vhosts=* --http.corsdomain=* --ws --config=/usr/src/app/config.yaml
 
-  xlayer-lrp:
-    container_name: xlayer-lrp
-    image: cdk-erigon
-    environment:
-      - CDK_ERIGON_SEQUENCER=0
-    ports:
-      - 6062:6060
-      - 8126:8545
-      - 6902:6900
-      - 9093:9095
-    volumes:
-      - ./data/lrp/:/home/erigon/data/
-      - ./config/test.erigon.rpc.config.yaml:/usr/src/app/config.yaml
-      - ./config/dynamic-mynetwork-allocs.json:/usr/src/app/dynamic-mynetwork-allocs.json
-      - ./config/dynamic-mynetwork-chainspec.json:/usr/src/app/dynamic-mynetwork-chainspec.json
-      - ./config/dynamic-mynetwork-conf.json:/usr/src/app/dynamic-mynetwork-conf.json
-    command: >
-      cdk-erigon --http.vhosts=* --http.corsdomain=* --ws --config=/usr/src/app/config.yaml
-
-  xlayer-lrp-unwind:
-    container_name: xlayer-lrp-unwind
-    image: cdk-erigon
-    environment:
-      - CDK_ERIGON_SEQUENCER=0
-    volumes:
-      - ./data/lrp/:/home/erigon/data/
-      - ./config/test.erigon.rpc.config.yaml:/usr/src/app/config.yaml
-      - ./config/dynamic-mynetwork-allocs.json:/usr/src/app/dynamic-mynetwork-allocs.json
-      - ./config/dynamic-mynetwork-chainspec.json:/usr/src/app/dynamic-mynetwork-chainspec.json
-      - ./config/dynamic-mynetwork-conf.json:/usr/src/app/dynamic-mynetwork-conf.json
-    command: >
-      integration state_stages_zkevm --config=/usr/src/app/config.yaml --chain dynamic-mynetwork --datadir /home/erigon/data/ --unwind-batch-no=1
-
-  xlayer-lrp-resequence:
-    container_name: xlayer-lrp-resequence
-    image: cdk-erigon
-    environment:
-      - CDK_ERIGON_SEQUENCER=1
-    ports:
-      - 6062:6060
-      - 8126:8545
-      - 6902:6900
-      - 9093:9095
-    volumes:
-      - ./data/lrp/:/home/erigon/data/
-      - ./config/test.erigon.seq.config.yaml:/usr/src/app/config.yaml
-      - ./config/dynamic-mynetwork-allocs.json:/usr/src/app/dynamic-mynetwork-allocs.json
-      - ./config/dynamic-mynetwork-chainspec.json:/usr/src/app/dynamic-mynetwork-chainspec.json
-      - ./config/dynamic-mynetwork-conf.json:/usr/src/app/dynamic-mynetwork-conf.json
-    command: >
-      cdk-erigon --zkevm.l1-cache-enabled=true --zkevm.sequencer-resequence=true --http.vhosts=* --http.corsdomain=* --ws --config=/usr/src/app/config.yaml
-
   xlayer-mock-l1-network:
     container_name: xlayer-mock-l1-network
     image: zjg555543/geth:fork13-v0.0.3
