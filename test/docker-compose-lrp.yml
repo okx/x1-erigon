@@ -87,25 +87,22 @@ services:
     volumes:
       - ./mainnet/seq:/home/erigon/data/
       - ./config/xlayerconfig-mainnet.yaml:/usr/src/app/config.yaml
+    profiles:
+      - internal-ds
     command: >
       cdk-erigon --zkevm.sequencer-resequence=true --zkevm.sequencer-resequence-halt-on-batch-number=134550 --http.vhosts=* --http.corsdomain=* --ws --config=/usr/src/app/config.yaml
 
   xlayer-mainnet-lrp-resequence-with-external-datastream:
-    container_name: xlayer-mainnet-lrp-resequence-with-external-datastream
+    container_name: xlayer-mainnet-lrp-resequence
     image: cdk-erigon
-    environment:
-      - CDK_ERIGON_SEQUENCER=1
+    extends: xlayer-mainnet-lrp-resequence
     ports:
-      - 6060:6060
-      - 8126:8545
-      - 6902:6900
       - 16902:16900
-      - 9093:9095
     volumes:
-      - ./mainnet/seq:/home/erigon/data/
-      - ./config/xlayerconfig-mainnet.yaml:/usr/src/app/config.yaml
       - ./external_ds/data-stream.bin:/home/data-stream.bin
       - ./external_ds/data-stream.db:/home/data-stream.db/
+    profiles:
+      - external-ds
     command: >
       cdk-erigon --zkevm.sequencer-resequence=true --zkevm.sequencer-resequence-halt-on-batch-number=134550 --zkevm.sequencer-resequence-external-datastream=true --http.vhosts=* --http.corsdomain=* --ws --config=/usr/src/app/config.yaml
 
