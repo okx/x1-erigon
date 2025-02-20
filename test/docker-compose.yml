@@ -383,8 +383,17 @@ services:
     container_name: xlayer-seq
     image: cdk-erigon
     environment:
-      - WRITE_MAP=true
       - CDK_ERIGON_SEQUENCER=1
+      - WRITE_MAP=true
+      - NO_MEMSTAT=false
+      - WRITE_MAP=false
+      - MDBX_DIRTY_SPACE_MB=16
+      - NO_SYNC=false
+      - MERGE_THRESHOLD=3
+      - MDBX_READAHEAD=false
+      - DISCARD_HISTORY=false
+#      - SLOW_TX=10s
+
     ports:
       - 6060:6060
       - 8123:8545

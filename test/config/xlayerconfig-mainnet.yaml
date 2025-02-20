@@ -63,6 +63,12 @@ metrics: true
 metrics.addr: "0.0.0.0"
 metrics.port: 9095
 
+# for db
+db.read.concurrency: 16
+db.pagesize: 8KB
+db.size.limit: 12TB
+
+
 yieldsize: 35
 zkevm.seal-batch-immediately-on-overflow: true
 zkevm.sequencer-timeout-on-empty-tx-pool: 1ms
