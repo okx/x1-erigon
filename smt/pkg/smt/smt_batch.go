@@ -437,6 +437,7 @@ func (s *SMT) findInsertingPoint(
 ) {
 	insertingNodePathLevel = -1
 	visitedNodeHashes = make([]*utils.NodeKey, 0, 256)
+	visitedNodeMap := make(map[string]struct{}) // 用于避免重复添加节点
 
 	var (
 		insertingPointerToSmtBatchNodeParent *smtBatchNode
@@ -444,13 +445,17 @@ func (s *SMT) findInsertingPoint(
 	)
 
 	for {
-		if (*insertingPointerToSmtBatchNode) == nil { // update in-memory structure from db
+		if (*insertingPointerToSmtBatchNode) == nil { // 从数据库更新内存结构
 			if !insertingPointerNodeHash.IsZero() {
 				*insertingPointerToSmtBatchNode, err = s.fetchNodeDataFromDb(insertingPointerNodeHash, insertingPointerToSmtBatchNodeParent)
 				if err != nil {
 					return -2, insertingPointerToSmtBatchNode, visitedNodeHashes, err
 				}
-				visitedNodeHashes = append(visitedNodeHashes, insertingPointerNodeHash)
+				// 记录访问的节点，避免重复添加
+				if _, exists := visitedNodeMap[insertingPointerNodeHash.ToBigInt().String()]; !exists {
+					visitedNodeHashes = append(visitedNodeHashes, insertingPointerNodeHash)
+					visitedNodeMap[insertingPointerNodeHash.ToBigInt().String()] = struct{}{}
+				}
 			} else {
 				if insertingNodePathLevel != -1 {
 					return -2, insertingPointerToSmtBatchNode, visitedNodeHashes, fmt.Errorf("nodekey is zero at non-root level")
@@ -467,31 +472,34 @@ func (s *SMT) findInsertingPoint(
 
 		insertingNodePathLevel++
 
+		// 如果节点是叶子节点，跳出循环
 		if (*insertingPointerToSmtBatchNode).isLeaf() {
 			break
 		}
 
 		if fetchDirectSiblings {
-			// load direct siblings of a non-leaf from the DB
-			if (*insertingPointerToSmtBatchNode).leftNode == nil {
-				(*insertingPointerToSmtBatchNode).leftNode, err = s.fetchNodeDataFromDb((*insertingPointerToSmtBatchNode).nodeLeftHashOrRemainingKey, (*insertingPointerToSmtBatchNode))
-				if err != nil {
-					return -2, insertingPointerToSmtBatchNode, visitedNodeHashes, err
-				}
-				visitedNodeHashes = append(visitedNodeHashes, (*insertingPointerToSmtBatchNode).nodeLeftHashOrRemainingKey)
+			// 批量加载左兄弟和右兄弟
+			err := s.fetchSiblingNodes(*insertingPointerToSmtBatchNode)
+			if err != nil {
+				return -2, insertingPointerToSmtBatchNode, visitedNodeHashes, err
 			}
-			if (*insertingPointerToSmtBatchNode).rightNode == nil {
-				(*insertingPointerToSmtBatchNode).rightNode, err = s.fetchNodeDataFromDb((*insertingPointerToSmtBatchNode).nodeRightHashOrValueHash, (*insertingPointerToSmtBatchNode))
-				if err != nil {
-					return -2, insertingPointerToSmtBatchNode, visitedNodeHashes, err
-				}
+
+			// 记录访问的兄弟节点，避免重复添加
+			if _, exists := visitedNodeMap[(*insertingPointerToSmtBatchNode).nodeLeftHashOrRemainingKey.ToBigInt().String()]; !exists {
+				visitedNodeHashes = append(visitedNodeHashes, (*insertingPointerToSmtBatchNode).nodeLeftHashOrRemainingKey)
+				visitedNodeMap[(*insertingPointerToSmtBatchNode).nodeLeftHashOrRemainingKey.ToBigInt().String()] = struct{}{}
+			}
+
+			if _, exists := visitedNodeMap[(*insertingPointerToSmtBatchNode).nodeRightHashOrValueHash.ToBigInt().String()]; !exists {
 				visitedNodeHashes = append(visitedNodeHashes, (*insertingPointerToSmtBatchNode).nodeRightHashOrValueHash)
+				visitedNodeMap[(*insertingPointerToSmtBatchNode).nodeRightHashOrValueHash.ToBigInt().String()] = struct{}{}
 			}
 		}
 
 		insertDirection := insertingNodePath[insertingNodePathLevel]
-		nextInsertingPointerNodeHash = (*insertingPointerToSmtBatchNode).getNextNodeHashInDirection(insertDirection)
-		nextInsertingPointerToSmtBatchNode = (*insertingPointerToSmtBatchNode).getChildInDirection(insertDirection)
+		// 合并获取下一个节点的计算
+		nextInsertingPointerNodeHash, nextInsertingPointerToSmtBatchNode = (*insertingPointerToSmtBatchNode).getNextNodeInfo(insertDirection)
+
 		if nextInsertingPointerNodeHash.IsZero() && (*nextInsertingPointerToSmtBatchNode) == nil {
 			break
 		}
@@ -502,6 +510,23 @@ func (s *SMT) findInsertingPoint(
 	}
 
 	return insertingNodePathLevel, insertingPointerToSmtBatchNode, visitedNodeHashes, nil
+}
+
+func (s *SMT) fetchSiblingNodes(node *smtBatchNode) error {
+	var err error
+	if node.leftNode == nil {
+		node.leftNode, err = s.fetchNodeDataFromDb(node.nodeLeftHashOrRemainingKey, node)
+		if err != nil {
+			return err
+		}
+	}
+	if node.rightNode == nil {
+		node.rightNode, err = s.fetchNodeDataFromDb(node.nodeRightHashOrValueHash, node)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func updateNodeHashesForDelete(
@@ -610,6 +635,22 @@ func (s *SMT) fetchNodeDataFromDb(nodeHash *utils.NodeKey, parentNode *smtBatchN
 
 func (sbn *smtBatchNode) isLeaf() bool {
 	return sbn.leaf
+}
+
+func (node *smtBatchNode) getNextNodeInfo(insertDirection int) (*utils.NodeKey, **smtBatchNode) {
+	var nextNodeHash *utils.NodeKey
+	var nextNodePointer **smtBatchNode
+
+	// 根据插入方向选择左或右节点
+	if insertDirection == 0 { // 假设 0 是左子节点
+		nextNodeHash = node.nodeLeftHashOrRemainingKey
+		nextNodePointer = &node.leftNode
+	} else { // 其他情况下是右子节点
+		nextNodeHash = node.nodeRightHashOrValueHash
+		nextNodePointer = &node.rightNode
+	}
+
+	return nextNodeHash, nextNodePointer
 }
 
 func (sbn *smtBatchNode) getTheSingleLeafAndDirectionIfAny() (*smtBatchNode, int) {
