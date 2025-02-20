@@ -176,7 +176,7 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 
 	bucket := toBucket
 	var cursor kv.RwCursor
-	haveSortingGuaranties := isIdentityLoadFunc(loadFunc) // user-defined loadFunc may change ordering
+	haveSortingGuaranties := isIdentityLoadFunc(loadFunc)
 	var lastKey []byte
 	if bucket != "" {
 		var err error
@@ -197,12 +197,53 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
-	// *** 新增：批量写入优化 ***
+	// 批量处理配置
 	batchLimit := 1000
 	batchKeys := make([][]byte, 0, batchLimit)
 	batchValues := make([][]byte, 0, batchLimit)
-
+	batchDeletes := make([][]byte, 0, batchLimit)
 	i := 0
+
+	// 批量删除操作
+	batchDelete := func(db kv.RwTx, keys [][]byte, bucket string) error {
+		// 直接操作游标进行删除
+		cursor, err := db.RwCursor(bucket)
+		if err != nil {
+			return fmt.Errorf("cursor creation failed: %w", err)
+		}
+
+		// 执行批量删除
+		for _, key := range keys {
+			if err := cursor.Delete(key); err != nil {
+				return fmt.Errorf("batch delete failed: %w", err)
+			}
+		}
+		return nil
+	}
+
+	// 批量 put 操作
+	batchPut := func(db kv.RwTx, keys [][]byte, values [][]byte, isDupSort bool, bucket string) error {
+		// 执行批量 put
+		cursor, err := db.RwCursor(bucket)
+		if err != nil {
+			return fmt.Errorf("cursor creation failed: %w", err)
+		}
+
+		// 执行批量 put
+		for i := 0; i < len(keys); i++ {
+			if isDupSort {
+				if err := cursor.(kv.RwCursorDupSort).AppendDup(keys[i], values[i]); err != nil {
+					return fmt.Errorf("appendDup batch failed: %w", err)
+				}
+			} else {
+				if err := cursor.Append(keys[i], values[i]); err != nil {
+					return fmt.Errorf("append batch failed: %w", err)
+				}
+			}
+		}
+		return nil
+	}
+
 	loadNextFunc := func(_, k, v []byte) error {
 		if i == 0 {
 			isEndOfBucket := lastKey == nil || bytes.Compare(lastKey, k) == -1
@@ -210,7 +251,7 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 		}
 		i++
 
-		// 日志记录优化，减少 `select-case` 阻塞
+		// 记录日志
 		select {
 		case <-logEvery.C:
 			logArgs := []interface{}{"into", bucket}
@@ -223,50 +264,38 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 		default:
 		}
 
-		// nil 值处理优化
+		// 处理 nil 值
 		if len(v) == 0 {
 			if canUseAppend {
 				return nil
 			}
-			return cursor.Delete(k)
+			batchDeletes = append(batchDeletes, k) // 收集删除操作
+			// 批量删除优化
+			if len(batchDeletes) >= batchLimit {
+				if err := batchDelete(db, batchDeletes, toBucket); err != nil {
+					return err
+				}
+				batchDeletes = batchDeletes[:0]
+			}
+			return nil
 		}
 
 		// 批量写入
 		if canUseAppend {
-			// 如果是重复排序表，则使用 AppendDup
-			if isDupSort {
-				// 批量添加重复排序的键值对
-				batchKeys = append(batchKeys, k)
-				batchValues = append(batchValues, v)
-			} else {
-				// 批量添加普通键值对
-				batchKeys = append(batchKeys, k)
-				batchValues = append(batchValues, v)
-			}
+			batchKeys = append(batchKeys, k)
+			batchValues = append(batchValues, v)
 
-			// 达到批次大小后进行批量提交
 			if len(batchKeys) >= batchLimit {
-				for i := 0; i < len(batchKeys); i++ {
-					if isDupSort {
-						// 使用 AppendDup 来处理重复排序表
-						if err := cursor.(kv.RwCursorDupSort).AppendDup(batchKeys[i], batchValues[i]); err != nil {
-							return fmt.Errorf("appendDup batch failed: %w", err)
-						}
-					} else {
-						// 普通的 Append 操作
-						if err := cursor.Append(batchKeys[i], batchValues[i]); err != nil {
-							return fmt.Errorf("append batch failed: %w", err)
-						}
-					}
+				if err := batchPut(db, batchKeys, batchValues, isDupSort, toBucket); err != nil {
+					return err
 				}
-				// 清空批次
 				batchKeys = batchKeys[:0]
 				batchValues = batchValues[:0]
 			}
 			return nil
 		}
 
-		// 默认使用 Put
+		// 默认执行 Put
 		if err := cursor.Put(k, v); err != nil {
 			return fmt.Errorf("%s: put: k=%x, %w", c.logPrefix, k, err)
 		}
@@ -283,18 +312,15 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 		return fmt.Errorf("loadIntoTable %s: %w", toBucket, err)
 	}
 
-	// 处理剩余的批量数据
+	// 批量处理剩余的数据
 	if len(batchKeys) > 0 {
-		for i := 0; i < len(batchKeys); i++ {
-			if isDupSort {
-				if err := cursor.(kv.RwCursorDupSort).AppendDup(batchKeys[i], batchValues[i]); err != nil {
-					return fmt.Errorf("appendDup remaining batch failed: %w", err)
-				}
-			} else {
-				if err := cursor.Append(batchKeys[i], batchValues[i]); err != nil {
-					return fmt.Errorf("append remaining batch failed: %w", err)
-				}
-			}
+		if err := batchPut(db, batchKeys, batchValues, isDupSort, toBucket); err != nil {
+			return err
+		}
+	}
+	if len(batchDeletes) > 0 {
+		if err := batchDelete(db, batchDeletes, toBucket); err != nil {
+			return err
 		}
 	}
 
