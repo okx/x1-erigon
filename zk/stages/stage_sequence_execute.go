@@ -26,6 +26,7 @@ import (
 )
 
 var shouldCheckForExecutionAndDataStreamAlignment = true
+var externalDataStreamServerCreated = false
 
 func SpawnSequencingStage(
 	s *stagedsync.StageState,
@@ -48,17 +49,18 @@ func SpawnSequencingStage(
 
 	var highestBatchInDs uint64
 	var externalDataStreamServer server.DataStreamServer
-	if cfg.zk.SequencerResequenceExternalDatastream {
+	if cfg.zk.SequencerResequenceExternalDatastream && !externalDataStreamServerCreated {
 		externalDataStreamServer, err = createExternalDataStreamServer(cfg)
-		highestBatchInDs, err = externalDataStreamServer.GetHighestBatchNumber()
 		if err != nil {
 			return err
 		}
+		externalDataStreamServerCreated = true
+		highestBatchInDs, err = externalDataStreamServer.GetHighestBatchNumber()
 	} else {
 		highestBatchInDs, err = cfg.dataStreamServer.GetHighestBatchNumber()
-		if err != nil {
-			return err
-		}
+	}
+	if err != nil {
+		return err
 	}
 
 	if lastBatch < highestBatchInDs {
