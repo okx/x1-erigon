@@ -115,8 +115,6 @@ func finaliseBlock(
 	infoTreeIndexProgress uint64,
 	batchCounters *vm.BatchCounterCollector,
 ) (*types.Block, error) {
-	quit := batchContext.ctx.Done()
-	_ = quit
 	thisBlockNumber := newHeader.Number.Uint64()
 	if err := batchContext.sdb.hermezDb.WriteBlockL1InfoTreeIndex(thisBlockNumber, l1TreeUpdateIndex); err != nil {
 		return nil, err
@@ -201,10 +199,6 @@ func finaliseBlock(
 	if err = batchContext.sdb.eridb.CommitBatch(); err != nil {
 		return nil, err
 	}
-
-	//if err = batchContext.sdb.eridb.CommitBatch(); err != nil {
-	//	return nil, err
-	//}
 
 	// For X Layer
 	metrics.GetLogStatistics().CumulativeTiming(metrics.ZkIncIntermediateHashesTiming, time.Since(zkIncStart))
