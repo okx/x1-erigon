@@ -1087,7 +1087,7 @@ func (db *HermezDbReader) GetForkIdBlock(forkId uint64) (uint64, bool, error) {
 		currentForkId := BytesToUint64(k)
 		if currentForkId == forkId {
 			blockNum = BytesToUint64(v)
-			log.Debug(fmt.Sprintf("[HermezDbReader] Got block num %d for forkId %d", blockNum, forkId))
+			//log.Debug(fmt.Sprintf("[HermezDbReader] Got block num %d for forkId %d", blockNum, forkId))
 			found = true
 			break
 		}
