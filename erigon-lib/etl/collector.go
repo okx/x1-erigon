@@ -294,11 +294,16 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 		}
 	}
 
-	// 批量插入 Heap，减少 heap 操作次数
+	// 批量插入 Heap
 	heapPushBatch(h, elements)
 
 	var prevK, prevV []byte
 	prevKSet := false
+
+	// **新增批量缓存**
+	batchSize := 1024
+	batchKeys := make([][]byte, 0, batchSize)
+	batchValues := make([][]byte, 0, batchSize)
 
 	// Main loading loop
 	for h.Len() > 0 {
@@ -312,20 +317,18 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 		switch args.BufferType {
 		case SortableOldestAppearedBuffer:
 			if !bytes.Equal(prevK, element.Key) {
-				if err = loadFunc(element.Key, element.Value); err != nil {
-					return err
-				}
+				batchKeys = append(batchKeys, common.ReuseOrCopy(nil, element.Key))
+				batchValues = append(batchValues, common.ReuseOrCopy(nil, element.Value))
 				prevK = common.ReuseOrCopy(prevK, element.Key)
 			}
 		case SortableAppendBuffer:
 			if !bytes.Equal(prevK, element.Key) {
 				if prevKSet {
-					if err = loadFunc(prevK, prevV); err != nil {
-						return err
-					}
+					batchKeys = append(batchKeys, common.ReuseOrCopy(nil, prevK))
+					batchValues = append(batchValues, common.ReuseOrCopy(nil, prevV))
 				}
 				prevK = common.ReuseOrCopy(prevK, element.Key)
-				prevV = append(prevV[:0], element.Value...) // 避免 append 触发扩容
+				prevV = append(prevV[:0], element.Value...)
 				prevKSet = true
 			} else {
 				prevV = append(prevV, element.Value...)
@@ -333,9 +336,8 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 		case SortableMergeBuffer:
 			if !bytes.Equal(prevK, element.Key) {
 				if prevKSet {
-					if err = loadFunc(prevK, prevV); err != nil {
-						return err
-					}
+					batchKeys = append(batchKeys, common.ReuseOrCopy(nil, prevK))
+					batchValues = append(batchValues, common.ReuseOrCopy(nil, prevV))
 				}
 				prevK = common.ReuseOrCopy(prevK, element.Key)
 				prevV = common.ReuseOrCopy(prevV, element.Value)
@@ -344,12 +346,20 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 				prevV = buf.(*oldestMergedEntrySortableBuffer).merge(prevV, element.Value)
 			}
 		default:
-			if err = loadFunc(element.Key, element.Value); err != nil {
-				return err
-			}
+			batchKeys = append(batchKeys, common.ReuseOrCopy(nil, element.Key))
+			batchValues = append(batchValues, common.ReuseOrCopy(nil, element.Value))
 		}
 
-		// 预取下一个元素，避免频繁 I/O
+		// **批量写入 LoadFunc**
+		if len(batchKeys) >= batchSize {
+			if err = batchLoadFunc(batchKeys, batchValues, loadFunc); err != nil {
+				return err
+			}
+			batchKeys = batchKeys[:0] // 清空
+			batchValues = batchValues[:0]
+		}
+
+		// 预取下一个元素
 		if element.Key, element.Value, err = provider.Next(element.Key[:0], element.Value[:0]); err == nil {
 			heapPush(h, element)
 		} else if !errors.Is(err, io.EOF) {
@@ -357,12 +367,23 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 		}
 	}
 
-	if args.BufferType == SortableAppendBuffer && prevKSet {
-		if err = loadFunc(prevK, prevV); err != nil {
+	// 处理剩余未满 batchSize 的数据
+	if len(batchKeys) > 0 {
+		if err = batchLoadFunc(batchKeys, batchValues, loadFunc); err != nil {
 			return err
 		}
 	}
 
+	return nil
+}
+
+// batchLoadFunc 负责批量调用 LoadFunc
+func batchLoadFunc(keys [][]byte, values [][]byte, loadFunc simpleLoadFunc) error {
+	for i := 0; i < len(keys); i++ {
+		if err := loadFunc(keys[i], values[i]); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
