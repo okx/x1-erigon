@@ -3,12 +3,22 @@ package stages
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/signal"
+	"sync"
 
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/zk/datastream/server"
 	"github.com/ledgerwatch/erigon/zk/datastream/types"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/sys/unix"
+)
+
+var (
+	doneChan        = make(chan struct{})
+	mu              = sync.Mutex{}
+	sequencingBatch bool
 )
 
 func resequence(
@@ -92,7 +102,15 @@ func resequence(
 		}
 	}
 
+	// listen for signals
+	sigc := make(chan os.Signal, 1)
+	signal.Notify(sigc, unix.SIGINT, unix.SIGTERM)
+	defer signal.Stop(sigc)
+
 	log.Info(fmt.Sprintf("[%s] Resequence from batch %d to %d in data stream", s.LogPrefix(), lastBatch+1, haltBatch))
+
+	updateSequencingBatch(true)
+	defer updateSequencingBatch(false)
 
 	for _, batch := range batches {
 		batchJob := NewResequenceBatchJob(batch)
@@ -108,7 +126,28 @@ func resequence(
 		if cfg.zk.SequencerResequenceStrict && subBatchCount != 1 {
 			return fmt.Errorf("strict mode enabled, but resequenced batch %d has %d sub-batches", batchJob.batchToProcess[0].BatchNumber, subBatchCount)
 		}
+
+		select {
+		case <-sigc:
+			log.Info(fmt.Sprintf("[%s] Had received signal, stopping resequencing", s.LogPrefix()))
+			doneChan <- struct{}{}
+			return nil
+		default:
+		}
 	}
 
 	return nil
+}
+
+func WaitResequenceBatchDone() (<-chan struct{}, bool) {
+	mu.Lock()
+	defer mu.Unlock()
+
+	return doneChan, sequencingBatch
+}
+
+func updateSequencingBatch(value bool) {
+	mu.Lock()
+	sequencingBatch = value
+	mu.Unlock()
 }
