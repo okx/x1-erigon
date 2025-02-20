@@ -206,13 +206,7 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 
 	// 批量删除操作
 	batchDelete := func(db kv.RwTx, keys [][]byte, bucket string) error {
-		// 直接操作游标进行删除
-		cursor, err := db.RwCursor(bucket)
-		if err != nil {
-			return fmt.Errorf("cursor creation failed: %w", err)
-		}
-
-		// 执行批量删除
+		// 使用现有的游标进行删除
 		for _, key := range keys {
 			if err := cursor.Delete(key); err != nil {
 				return fmt.Errorf("batch delete failed: %w", err)
@@ -223,13 +217,7 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 
 	// 批量 put 操作
 	batchPut := func(db kv.RwTx, keys [][]byte, values [][]byte, isDupSort bool, bucket string) error {
-		// 执行批量 put
-		cursor, err := db.RwCursor(bucket)
-		if err != nil {
-			return fmt.Errorf("cursor creation failed: %w", err)
-		}
-
-		// 执行批量 put
+		// 使用现有的游标进行 batch put
 		for i := 0; i < len(keys); i++ {
 			if isDupSort {
 				if err := cursor.(kv.RwCursorDupSort).AppendDup(keys[i], values[i]); err != nil {
