@@ -166,7 +166,9 @@ RUN_DOCKER_MAINNET_LRP_UNWIND := $(DOCKER_COMPOSE_LRP) up -d $(DOCKER_MAINNET_LR
 RUN_DOCKER_MAINNET_LRP_RESEQUENCE := $(DOCKER_COMPOSE_LRP) --profile internal-ds up -d $(DOCKER_MAINNET_LRP_RESEQUENCE)
 RUN_DOCKER_MAINNET_LRP_RESEQUENCE_WITH_EXTERNAL_DATASTREAM := $(DOCKER_COMPOSE_LRP) --profile external-ds up -d $(DOCKER_MAINNET_LRP_RESEQUENCE_WITH_EXTERNAL_DATASTREAM)
 
-STOP_LRP := $(DOCKER_COMPOSE_LRP) down --remove-orphans; sleep 3; rm -rf data
+STOP_LRP := docker ps -a | grep xlayer-mainnet | cut -d' ' -f1 | xargs -r docker stop; \
+			docker ps -a | grep xlayer-mainnet | cut -d' ' -f1 | xargs -r docker rm -f; \
+			$(DOCKER_COMPOSE_LRP) down --remove-orphans
 
 UNWIND_LOG_FILE := unwind.log
 RESEQUENCE_LOG_FILE := resequence.log
