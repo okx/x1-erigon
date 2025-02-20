@@ -63,7 +63,7 @@ metrics: true
 metrics.addr: "0.0.0.0"
 metrics.port: 9095
 
-zkevm.pre-run-address-list: ["0x5972Ba48D9DFce0DdDA18A25aa31cbD34201024d"]
+zkevm.pre-run-address-list: [""]
 zkevm.pre-run-cache-size: 10000
 zkevm.pre-run-cache-ttl: "60m"
 zkevm.pre-run-chan-num: 10000
@@ -71,4 +71,4 @@ zkevm.pre-run-task-num: 8
 
 yieldsize: 35
 zkevm.seal-batch-immediately-on-overflow: true
-zkevm.sequencer-timeout-on-empty-tx-pool: 5ms
+zkevm.sequencer-timeout-on-empty-tx-pool: 1ms
