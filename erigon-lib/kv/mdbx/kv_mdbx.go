@@ -1075,49 +1075,63 @@ func (tx *MdbxTx) Commit() error {
 	if tx.tx == nil {
 		return nil
 	}
+
+	// Use a goroutine for background cleanup tasks to avoid blocking the commit operation
 	defer func() {
 		tx.tx = nil
 		tx.db.trackTxEnd()
-		if tx.readOnly {
-			tx.db.readTxLimiter.Release(1)
-		} else {
-			tx.db.writeTxLimiter.Release(1)
-			runtime.UnlockOSThread()
-		}
-		tx.db.leakDetector.Del(tx.id)
-	}()
-	tx.closeCursors()
 
-	//slowTx := 10 * time.Second
-	//if debug.SlowCommit() > 0 {
-	//	slowTx = debug.SlowCommit()
+		// Background release of tx limiter to prevent blocking
+		go func() {
+			if tx.readOnly {
+				tx.db.readTxLimiter.Release(1)
+			} else {
+				tx.db.writeTxLimiter.Release(1)
+				runtime.UnlockOSThread()
+			}
+		}()
+
+		// Background leak detection removal
+		go func() {
+			tx.db.leakDetector.Del(tx.id)
+		}()
+
+		// Close cursors asynchronously to avoid blocking the commit
+		go tx.closeCursors()
+	}()
+
+	//// If debug metrics are enabled, collect them asynchronously
+	//if debug.SlowCommit() > 0 || debug.BigRoTxKb() > 0 || debug.BigRwTxKb() > 0 {
+	//	go tx.PrintDebugInfo()
 	//}
-	//
-	//if debug.BigRoTxKb() > 0 || debug.BigRwTxKb() > 0 {
-	//	tx.PrintDebugInfo()
-	//}
+
 	tx.CollectMetrics()
 
+	// Commit the transaction
 	latency, err := tx.tx.Commit()
 	if err != nil {
 		return fmt.Errorf("label: %s, %w", tx.db.opts.label, err)
 	}
 
+	// Optimized metrics collection: moved to goroutine to avoid blocking the commit
 	if tx.db.opts.label == kv.ChainDB {
-		kv.DbCommitPreparation.Observe(latency.Preparation.Seconds())
-		//kv.DbCommitAudit.Update(latency.Audit.Seconds())
-		kv.DbCommitWrite.Observe(latency.Write.Seconds())
-		kv.DbCommitSync.Observe(latency.Sync.Seconds())
-		kv.DbCommitEnding.Observe(latency.Ending.Seconds())
-		kv.DbCommitTotal.Observe(latency.Whole.Seconds())
+		go func() {
+			kv.DbCommitPreparation.Observe(latency.Preparation.Seconds())
+			// kv.DbCommitAudit.Update(latency.Audit.Seconds())
+			kv.DbCommitWrite.Observe(latency.Write.Seconds())
+			kv.DbCommitSync.Observe(latency.Sync.Seconds())
+			kv.DbCommitEnding.Observe(latency.Ending.Seconds())
+			kv.DbCommitTotal.Observe(latency.Whole.Seconds())
 
-		//kv.DbGcWorkPnlMergeTime.Update(latency.GCDetails.WorkPnlMergeTime.Seconds())
-		//kv.DbGcWorkPnlMergeVolume.Set(uint64(latency.GCDetails.WorkPnlMergeVolume))
-		//kv.DbGcWorkPnlMergeCalls.Set(uint64(latency.GCDetails.WorkPnlMergeCalls))
-		//
-		//kv.DbGcSelfPnlMergeTime.Update(latency.GCDetails.SelfPnlMergeTime.Seconds())
-		//kv.DbGcSelfPnlMergeVolume.Set(uint64(latency.GCDetails.SelfPnlMergeVolume))
-		//kv.DbGcSelfPnlMergeCalls.Set(uint64(latency.GCDetails.SelfPnlMergeCalls))
+			// Consider whether GC details need to be included
+			// kv.DbGcWorkPnlMergeTime.Update(latency.GCDetails.WorkPnlMergeTime.Seconds())
+			// kv.DbGcWorkPnlMergeVolume.Set(uint64(latency.GCDetails.WorkPnlMergeVolume))
+			// kv.DbGcWorkPnlMergeCalls.Set(uint64(latency.GCDetails.WorkPnlMergeCalls))
+			//
+			// kv.DbGcSelfPnlMergeTime.Update(latency.GCDetails.SelfPnlMergeTime.Seconds())
+			// kv.DbGcSelfPnlMergeVolume.Set(uint64(latency.GCDetails.SelfPnlMergeVolume))
+			// kv.DbGcSelfPnlMergeCalls.Set(uint64(latency.GCDetails.SelfPnlMergeCalls))
+		}()
 	}
 
 	return nil
