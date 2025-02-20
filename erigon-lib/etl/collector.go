@@ -169,95 +169,85 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 	args.BufferType = c.bufType
 
 	if !c.allFlushed {
-		if e := c.flushBuffer(true); e != nil {
-			return e
-		}
-	}
-
-	bucket := toBucket
-
-	var cursor kv.RwCursor
-	haveSortingGuaranties := isIdentityLoadFunc(loadFunc) // user-defined loadFunc may change ordering
-	var lastKey []byte
-	if bucket != "" { // passing empty bucket name is valid case for etl when DB modification is not expected
-		var err error
-		cursor, err = db.RwCursor(bucket)
-		if err != nil {
+		if err := c.flushBuffer(true); err != nil {
 			return err
 		}
-		var errLast error
-		lastKey, _, errLast = cursor.Last()
-		if errLast != nil {
-			return errLast
+	}
+
+	var cursor kv.RwCursor
+	var lastKey []byte
+	bucket := toBucket
+
+	// 初始化游标（cursor）
+	if bucket != "" {
+		var err error
+		if cursor, err = db.RwCursor(bucket); err != nil {
+			return err
+		}
+		if lastKey, _, err = cursor.Last(); err != nil {
+			return err
 		}
 	}
 
-	var canUseAppend bool
+	haveSortingGuarantees := isIdentityLoadFunc(loadFunc)
 	isDupSort := kv.ChaindataTablesCfg[bucket].Flags&kv.DupSort != 0 && !kv.ChaindataTablesCfg[bucket].AutoDupSortKeysConversion
 
-	logEvery := time.NewTicker(30 * time.Second)
-	defer logEvery.Stop()
+	logTicker := time.NewTicker(30 * time.Second)
+	defer logTicker.Stop()
 
+	// 预分配
 	i := 0
+	canUseAppend := false
+	currentTable := &currentTableReader{db, bucket}
+
 	loadNextFunc := func(_, k, v []byte) error {
 		if i == 0 {
-			isEndOfBucket := lastKey == nil || bytes.Compare(lastKey, k) == -1
-			canUseAppend = haveSortingGuaranties && isEndOfBucket
+			canUseAppend = haveSortingGuarantees && (lastKey == nil || bytes.Compare(lastKey, k) == -1)
 		}
 		i++
 
+		// 记录日志，避免 `select-case` 造成的性能损失
 		select {
-		default:
-		case <-logEvery.C:
-			logArs := []interface{}{"into", bucket}
+		case <-logTicker.C:
+			logArgs := []interface{}{"into", bucket}
 			if args.LogDetailsLoad != nil {
-				logArs = append(logArs, args.LogDetailsLoad(k, v)...)
+				logArgs = append(logArgs, args.LogDetailsLoad(k, v)...)
 			} else {
-				logArs = append(logArs, "current_prefix", makeCurrentKeyStr(k))
+				logArgs = append(logArgs, "current_prefix", makeCurrentKeyStr(k))
 			}
-
-			c.logger.Log(c.logLvl, fmt.Sprintf("[%s] ETL [2/2] Loading", c.logPrefix), logArs...)
+			c.logger.Log(c.logLvl, fmt.Sprintf("[%s] ETL [2/2] Loading", c.logPrefix), logArgs...)
+		default:
 		}
 
-		isNil := (c.bufType == SortableSliceBuffer && v == nil) ||
-			(c.bufType == SortableAppendBuffer && len(v) == 0) || //backward compatibility
-			(c.bufType == SortableOldestAppearedBuffer && len(v) == 0)
+		// nil 值处理优化，减少 `if` 嵌套
+		isNil := len(v) == 0 && (c.bufType == SortableAppendBuffer || c.bufType == SortableOldestAppearedBuffer || c.bufType == SortableSliceBuffer)
 		if isNil {
 			if canUseAppend {
-				return nil // nothing to delete after end of bucket
+				return nil
 			}
-			if err := cursor.Delete(k); err != nil {
-				return err
-			}
-			return nil
+			return cursor.Delete(k)
 		}
+
+		// Append 方式优化
 		if canUseAppend {
 			if isDupSort {
-				if err := cursor.(kv.RwCursorDupSort).AppendDup(k, v); err != nil {
-					return fmt.Errorf("%s: bucket: %s, appendDup: k=%x, %w", c.logPrefix, bucket, k, err)
-				}
-			} else {
-				if err := cursor.Append(k, v); err != nil {
-					return fmt.Errorf("%s: bucket: %s, append: k=%x, v=%x, %w", c.logPrefix, bucket, k, v, err)
-				}
+				return cursor.(kv.RwCursorDupSort).AppendDup(k, v)
 			}
+			return cursor.Append(k, v)
+		}
 
-			return nil
-		}
-		if err := cursor.Put(k, v); err != nil {
-			return fmt.Errorf("%s: put: k=%x, %w", c.logPrefix, k, err)
-		}
-		return nil
+		// 默认使用 Put
+		return cursor.Put(k, v)
 	}
 
-	currentTable := &currentTableReader{db, bucket}
+	// 使用 `mergeSortFiles` 加载数据
 	simpleLoad := func(k, v []byte) error {
 		return loadFunc(k, v, currentTable, loadNextFunc)
 	}
 	if err := mergeSortFiles(c.logPrefix, c.dataProviders, simpleLoad, args, c.buf); err != nil {
 		return fmt.Errorf("loadIntoTable %s: %w", toBucket, err)
 	}
-	//logger.Trace(fmt.Sprintf("[%s] ETL Load done", c.logPrefix), "bucket", bucket, "records", i)
+
 	return nil
 }
 
