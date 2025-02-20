@@ -155,8 +155,6 @@ mainnet: build-docker
 	$(RUN_DOCKER_GRAFANA)
 
 DOCKER_COMPOSE_LRP := docker compose -f docker-compose-lrp.yml
-DOCKER_LRP_UNWIND := xlayer-lrp-unwind
-DOCKER_LRP_RESEQUENCE := xlayer-lrp-resequence
 DOCKER_MAINNET_LRP_UNWIND := xlayer-mainnet-lrp-unwind
 DOCKER_MAINNET_LRP_UNWIND_CONTAINER := xlayer-mainnet-lrp-unwind
 DOCKER_MAINNET_LRP_RESEQUENCE := xlayer-mainnet-lrp-resequence
@@ -164,9 +162,6 @@ DOCKER_MAINNET_LRP_RESEQUENCE_WITH_EXTERNAL_DATASTREAM := xlayer-mainnet-lrp-res
 DOCKER_MAINNET_LRP_RESEQUENCE_CONTAINER := xlayer-mainnet-lrp-resequence
 
 RUN_DOCKER_LRP_STATELESS_EXECUTOR := $(DOCKER_COMPOSE_LRP) up -d $(DOCKER_STATELESS_EXECUTOR)
-RUN_DOCKER_LRP_L1_NETWORK := $(DOCKER_COMPOSE_LRP) up -d $(DOCKER_L1_NETWORK)
-RUN_DOCKER_LRP_UNWIND := $(DOCKER_COMPOSE_LRP) up -d $(DOCKER_LRP_UNWIND)
-RUN_DOCKER_LRP_RESEQUENCE := $(DOCKER_COMPOSE_LRP) up -d $(DOCKER_LRP_RESEQUENCE)
 RUN_DOCKER_MAINNET_LRP_UNWIND := $(DOCKER_COMPOSE_LRP) up -d $(DOCKER_MAINNET_LRP_UNWIND)
 RUN_DOCKER_MAINNET_LRP_RESEQUENCE := $(DOCKER_COMPOSE_LRP) --profile internal-ds up -d $(DOCKER_MAINNET_LRP_RESEQUENCE)
 RUN_DOCKER_MAINNET_LRP_RESEQUENCE_WITH_EXTERNAL_DATASTREAM := $(DOCKER_COMPOSE_LRP) --profile external-ds up -d $(DOCKER_MAINNET_LRP_RESEQUENCE_WITH_EXTERNAL_DATASTREAM)
@@ -235,21 +230,6 @@ lrp-config-apply:
 		sed -i "s/--zkevm.sequencer-resequence-halt-on-batch-number=[0-9]*/--zkevm.sequencer-resequence-halt-on-batch-number=$$TO_BATCH_NO/" docker-compose-lrp.yml; \
 		sed -i "s/--zkevm.sequencer-resequence-external-datastream=\(true\|false\)/--zkevm.sequencer-resequence-external-datastream=$$EXTERNAL_DS/" docker-compose-lrp.yml; \
 	fi
-
-.PHONY: lrp-run
-lrp-run: build-docker lrp-config-apply
-	$(RUN_DOCKER_LRP_L1_NETWORK)
-	sleep 3
-	$(RUN_DOCKER_LRP_UNWIND)
-	docker wait $(DOCKER_LRP_UNWIND_CONTAINER)
-	docker logs $(DOCKER_LRP_UNWIND_CONTAINER) > $(UNWIND_LOG_FILE) 2>&1
-	$(RUN_DOCKER_LRP_RESEQUENCE)
-
-.PHONY: lrp-tps
-lrp-tps: ## Filter logs for LRP & Compute TPS
-	docker logs $(DOCKER_LRP_RESEQUENCE_CONTAINER) > $(RESEQUENCE_LOG_FILE) 2>&1
-	docker logs $(DOCKER_LRP_RESEQUENCE_CONTAINER) 2>&1 | grep "\[5/13 Execution\]" > $(RESEQUENCE_FILTERED_LOG_FILE)
-	python process_log.py $(RESEQUENCE_FILTERED_LOG_FILE)
 
 .PHONY: lrp-mainnet
 lrp-mainnet: build-docker lrp-config-apply
