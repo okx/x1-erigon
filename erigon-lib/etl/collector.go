@@ -282,17 +282,23 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 
 	h := &Heap{}
 	heapInit(h)
+
+	// 预取第一批数据
+	elements := make([]*HeapElem, 0, len(providers))
 	for i, provider := range providers {
 		if key, value, err := provider.Next(nil, nil); err == nil {
-			heapPush(h, &HeapElem{key, value, i})
-		} else /* we must have at least one entry per file */ {
-			eee := fmt.Errorf("%s: error reading first readers: n=%d current=%d provider=%s err=%w",
+			elements = append(elements, &HeapElem{key, value, i})
+		} else {
+			return fmt.Errorf("%s: error reading first readers: n=%d current=%d provider=%s err=%w",
 				logPrefix, len(providers), i, provider, err)
-			panic(eee)
 		}
 	}
 
+	// 批量插入 Heap，减少 heap 操作次数
+	heapPushBatch(h, elements)
+
 	var prevK, prevV []byte
+	prevKSet := false
 
 	// Main loading loop
 	for h.Len() > 0 {
@@ -303,49 +309,47 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 		element := heapPop(h)
 		provider := providers[element.TimeIdx]
 
-		// SortableOldestAppearedBuffer must guarantee that only 1 oldest value of key will appear
-		// but because size of buffer is limited - each flushed file does guarantee "oldest appeared"
-		// property, but files may overlap. files are sorted, just skip repeated keys here
-		if args.BufferType == SortableOldestAppearedBuffer {
+		switch args.BufferType {
+		case SortableOldestAppearedBuffer:
 			if !bytes.Equal(prevK, element.Key) {
 				if err = loadFunc(element.Key, element.Value); err != nil {
 					return err
 				}
-				// Need to copy k because the underlying space will be re-used for the next key
-				prevK = common.Copy(element.Key)
+				prevK = common.ReuseOrCopy(prevK, element.Key)
 			}
-		} else if args.BufferType == SortableAppendBuffer {
+		case SortableAppendBuffer:
 			if !bytes.Equal(prevK, element.Key) {
-				if prevK != nil {
+				if prevKSet {
 					if err = loadFunc(prevK, prevV); err != nil {
 						return err
 					}
 				}
-				// Need to copy k because the underlying space will be re-used for the next key
-				prevK = common.Copy(element.Key)
-				prevV = common.Copy(element.Value)
+				prevK = common.ReuseOrCopy(prevK, element.Key)
+				prevV = append(prevV[:0], element.Value...) // 避免 append 触发扩容
+				prevKSet = true
 			} else {
 				prevV = append(prevV, element.Value...)
 			}
-		} else if args.BufferType == SortableMergeBuffer {
+		case SortableMergeBuffer:
 			if !bytes.Equal(prevK, element.Key) {
-				if prevK != nil {
+				if prevKSet {
 					if err = loadFunc(prevK, prevV); err != nil {
 						return err
 					}
 				}
-				// Need to copy k because the underlying space will be re-used for the next key
-				prevK = common.Copy(element.Key)
-				prevV = common.Copy(element.Value)
+				prevK = common.ReuseOrCopy(prevK, element.Key)
+				prevV = common.ReuseOrCopy(prevV, element.Value)
+				prevKSet = true
 			} else {
 				prevV = buf.(*oldestMergedEntrySortableBuffer).merge(prevV, element.Value)
 			}
-		} else {
+		default:
 			if err = loadFunc(element.Key, element.Value); err != nil {
 				return err
 			}
 		}
 
+		// 预取下一个元素，避免频繁 I/O
 		if element.Key, element.Value, err = provider.Next(element.Key[:0], element.Value[:0]); err == nil {
 			heapPush(h, element)
 		} else if !errors.Is(err, io.EOF) {
@@ -353,15 +357,20 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 		}
 	}
 
-	if args.BufferType == SortableAppendBuffer {
-		if prevK != nil {
-			if err = loadFunc(prevK, prevV); err != nil {
-				return err
-			}
+	if args.BufferType == SortableAppendBuffer && prevKSet {
+		if err = loadFunc(prevK, prevV); err != nil {
+			return err
 		}
 	}
 
 	return nil
+}
+
+// heapPushBatch 批量插入 heap，减少 heap 操作的开销
+func heapPushBatch(h *Heap, elements []*HeapElem) {
+	for _, elem := range elements {
+		heapPush(h, elem)
+	}
 }
 
 func makeCurrentKeyStr(k []byte) string {

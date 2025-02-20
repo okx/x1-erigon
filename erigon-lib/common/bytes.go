@@ -53,6 +53,16 @@ func Copy(b []byte) []byte {
 	return c
 }
 
+// ReuseOrCopy 复用已有的字节切片，避免重复分配内存
+func ReuseOrCopy(dst, src []byte) []byte {
+	if cap(dst) >= len(src) {
+		dst = dst[:len(src)]
+		copy(dst, src)
+		return dst
+	}
+	return Copy(src)
+}
+
 func EnsureEnoughSize(in []byte, size int) []byte {
 	if cap(in) < size {
 		newBuf := make([]byte, size)
