@@ -17,7 +17,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	"github.com/ledgerwatch/erigon/zk/utils"
-	"github.com/ledgerwatch/log/v3"
 )
 
 // SendRawTransaction implements eth_sendRawTransaction. Creates new message call transaction or a contract creation for previously-signed transactions.
@@ -107,12 +106,7 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutility
 		}
 	}
 	if len(api.PreRunList) > 0 && utils2.CheckAddressExists(api.PreRunList, txn.GetTo()) {
-		go func() {
-			_, err = api.preRun(txn, chainId)
-			if err != nil {
-				log.Error("Estimating gas failed for pay tx", "error", err)
-			}
-		}()
+		api.preRun(txn, chainId)
 	}
 
 	hash := txn.Hash()

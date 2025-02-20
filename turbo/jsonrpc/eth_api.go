@@ -384,9 +384,10 @@ type APIImpl struct {
 	LogsMaxRange                  uint64
 
 	// For X Layer
-	L2GasPricer   gasprice.L2GasPricer
-	EnableInnerTx bool
-	PreRunList    map[common.Address]struct{}
+	L2GasPricer     gasprice.L2GasPricer
+	EnableInnerTx   bool
+	PreRunList      map[common.Address]struct{}
+	preRunProcessor *PreRunProcessor
 }
 
 // NewEthAPI returns APIImpl instance
@@ -436,9 +437,12 @@ func NewEthAPI(base *BaseAPI, db kv.RoDB, eth rpchelper.ApiBackend, txPool txpoo
 			// Only Sequencer requires to calculate dynamic gas price periodically
 			// eth_gasPrice requests for the RPC nodes are all redirected to the Sequencer node (via zkevm.l2-sequencer-rpc-url)
 			apii.runL2GasPricerForXLayer()
-			// Initialize the precompiled cache
+			// Initialize the precompiled cache and prerun workers
 			vm.InitPrecompiledCache(ethCfg.XLayer.PreRunCacheSize, ethCfg.XLayer.PreRunCacheTTL)
-			log.Info(fmt.Sprintf("XLayer pre run list:%v", apii.PreRunList))
+			apii.initPreRunWorkers(ethCfg.XLayer.PreRunChanNum, ethCfg.XLayer.PreRunTaskNum)
+			log.Info(fmt.Sprintf("XLayer pre run list:%v, cache size:%v, ttl:%v, chan:%v, task:%v",
+				apii.PreRunList, ethCfg.XLayer.PreRunCacheSize, ethCfg.XLayer.PreRunCacheTTL,
+				ethCfg.XLayer.PreRunChanNum, ethCfg.XLayer.PreRunTaskNum))
 		}
 	})
 

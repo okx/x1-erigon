@@ -17,6 +17,8 @@ type XLayerConfig struct {
 	PreRunList      map[common.Address]struct{}
 	PreRunCacheSize int
 	PreRunCacheTTL  time.Duration
+	PreRunChanNum   int
+	PreRunTaskNum   int
 }
 
 var DefaultXLayerConfig = XLayerConfig{}

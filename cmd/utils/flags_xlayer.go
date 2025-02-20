@@ -219,6 +219,16 @@ var (
 		Usage: "pre-run cache entry TTL",
 		Value: time.Hour,
 	}
+	PreRunChanNum = cli.IntFlag{
+		Name:  "zkevm.pre-run-chan-num",
+		Usage: "pre-run chan num",
+		Value: 10000,
+	}
+	PreRunTaskNum = cli.IntFlag{
+		Name:  "zkevm.pre-run-task-num",
+		Usage: "pre-run task num",
+		Value: 8,
+	}
 )
 
 func setGPOXLayer(ctx *cli.Context, cfg *gaspricecfg.Config) {
@@ -354,6 +364,8 @@ func SetPreRunList(ctx *cli.Context, cfg *ethconfig.Config) {
 		}
 		cfg.XLayer.PreRunCacheSize = ctx.Int(PreRunCacheSize.Name)
 		cfg.XLayer.PreRunCacheTTL = ctx.Duration(PreRunCacheTTL.Name)
+		cfg.XLayer.PreRunChanNum = ctx.Int(PreRunChanNum.Name)
+		cfg.XLayer.PreRunTaskNum = ctx.Int(PreRunTaskNum.Name)
 	}
 }
 
