@@ -154,21 +154,29 @@ mainnet: build-docker
 	$(RUN_DOCKER_PROMETHEUS)
 	$(RUN_DOCKER_GRAFANA)
 
-DOCKER_COMPOSE_LRP := docker compose -f docker-compose-lrp.yml
+# global & shell env variables
+USER_PREFIX = $(shell awk '/^user:/ {print $$2}' lrp.config.yaml)
+IMAGE_TAG = $(USER_PREFIX)-$(shell git rev-parse --short HEAD)
+export USER_PREFIX IMAGE_TAG
+PORT_DIFF = $(shell awk '/^portDiff:/ {print $$2}' lrp.config.yaml)
+PPROF_PORT = $(shell echo $$((6060 + $(PORT_DIFF))))
+RPC_PORT = $(shell echo $$((8545 + $(PORT_DIFF))))
+DS_PORT = $(shell echo $$((6900 + $(PORT_DIFF))))
+METRICS_PORT = $(shell echo $$((9095 + $(PORT_DIFF))))
+EXTERNAL_DS_PORT = $(shell echo $$((16900 + $(PORT_DIFF))))
+export PPROF_PORT RPC_PORT DS_PORT METRICS_PORT EXTERNAL_DS_PORT
+
+DOCKER_COMPOSE_LRP := docker compose -f docker-compose-lrp.yml -p $(USER_PREFIX)-xlayer-lrp
 DOCKER_MAINNET_LRP_UNWIND := xlayer-mainnet-lrp-unwind
-DOCKER_MAINNET_LRP_UNWIND_CONTAINER := xlayer-mainnet-lrp-unwind
+DOCKER_MAINNET_LRP_UNWIND_CONTAINER := $(USER_PREFIX)-xlayer-mainnet-lrp-unwind
 DOCKER_MAINNET_LRP_RESEQUENCE := xlayer-mainnet-lrp-resequence
 DOCKER_MAINNET_LRP_RESEQUENCE_WITH_EXTERNAL_DATASTREAM := xlayer-mainnet-lrp-resequence-with-external-datastream
-DOCKER_MAINNET_LRP_RESEQUENCE_CONTAINER := xlayer-mainnet-lrp-resequence
+DOCKER_MAINNET_LRP_RESEQUENCE_CONTAINER := $(USER_PREFIX)-xlayer-mainnet-lrp-resequence
 
 RUN_DOCKER_LRP_STATELESS_EXECUTOR := $(DOCKER_COMPOSE_LRP) up -d $(DOCKER_STATELESS_EXECUTOR)
 RUN_DOCKER_MAINNET_LRP_UNWIND := $(DOCKER_COMPOSE_LRP) up -d $(DOCKER_MAINNET_LRP_UNWIND)
 RUN_DOCKER_MAINNET_LRP_RESEQUENCE := $(DOCKER_COMPOSE_LRP) --profile internal-ds up -d $(DOCKER_MAINNET_LRP_RESEQUENCE)
 RUN_DOCKER_MAINNET_LRP_RESEQUENCE_WITH_EXTERNAL_DATASTREAM := $(DOCKER_COMPOSE_LRP) --profile external-ds up -d $(DOCKER_MAINNET_LRP_RESEQUENCE_WITH_EXTERNAL_DATASTREAM)
-
-STOP_LRP := docker ps -a | grep xlayer-mainnet | cut -d' ' -f1 | xargs -r docker stop; \
-			docker ps -a | grep xlayer-mainnet | cut -d' ' -f1 | xargs -r docker rm -f; \
-			$(DOCKER_COMPOSE_LRP) down --remove-orphans
 
 UNWIND_LOG_FILE := unwind.log
 RESEQUENCE_LOG_FILE := resequence.log
@@ -180,6 +188,11 @@ lrp-config:
 	@read -p "Enter fromBatchNumber: " FROM_BATCH_NO; \
 	read -p "Enter toBatchNumber: " TO_BATCH_NO; \
 	read -p "Use external datastream? (y/n): " USE_EXTERNAL_DS; \
+	read -p "Enter user: " USER_NAME; \
+	if [ -z "$$USER_NAME" ]; then \
+		USER_NAME=$$(if [ -n "$$SUDO_USER" ]; then echo "$$SUDO_USER"; else echo "$$USER"; fi); \
+	fi; \
+	read -p "Enter portDiff: " PORT_DIFF; \
 	UNWIND_BATCH_NO=$$((FROM_BATCH_NO - 1)); \
 	if [ "$$USE_EXTERNAL_DS" = "y" ]; then \
 		EXTERNAL_DS="true"; \
@@ -199,21 +212,31 @@ lrp-config:
 		echo "fromBatchNumber: $$FROM_BATCH_NO" > lrp.config.yaml; \
 		echo "toBatchNumber: $$TO_BATCH_NO" >> lrp.config.yaml; \
 		echo "useExternalDatastream: $$EXTERNAL_DS" >> lrp.config.yaml; \
+		echo "user: $$USER_NAME" >> lrp.config.yaml; \
+		echo "portDiff: $$PORT_DIFF" >> lrp.config.yaml; \
 	else \
 		if [ "$(shell uname)" = "Darwin" ]; then \
 			sed -i '' "s/^fromBatchNumber:.*/fromBatchNumber: $$FROM_BATCH_NO/" lrp.config.yaml; \
 			sed -i '' "s/^toBatchNumber:.*/toBatchNumber: $$TO_BATCH_NO/" lrp.config.yaml; \
 			sed -i '' "s/^useExternalDatastream:.*/useExternalDatastream: $$EXTERNAL_DS/" lrp.config.yaml; \
+			sed -i '' "s/^user:.*/user: $$USER_NAME/" lrp.config.yaml; \
+			sed -i '' "s/^portDiff:.*/portDiff: $$PORT_DIFF/" lrp.config.yaml; \
 			if ! grep -q "^fromBatchNumber:" lrp.config.yaml; then echo "fromBatchNumber: $$FROM_BATCH_NO" >> lrp.config.yaml; fi; \
 			if ! grep -q "^toBatchNumber:" lrp.config.yaml; then echo "toBatchNumber: $$TO_BATCH_NO" >> lrp.config.yaml; fi; \
 			if ! grep -q "^useExternalDatastream:" lrp.config.yaml; then echo "useExternalDatastream: $$EXTERNAL_DS" >> lrp.config.yaml; fi; \
+			if ! grep -q "^user:" lrp.config.yaml; then echo "user: $$USER_NAME" >> lrp.config.yaml; fi; \
+			if ! grep -q "^portDiff:" lrp.config.yaml; then echo "portDiff: $$PORT_DIFF" >> lrp.config.yaml; fi; \
 		else \
 			sed -i "s/^fromBatchNumber:.*/fromBatchNumber: $$FROM_BATCH_NO/" lrp.config.yaml; \
 			sed -i "s/^toBatchNumber:.*/toBatchNumber: $$TO_BATCH_NO/" lrp.config.yaml; \
 			sed -i "s/^useExternalDatastream:.*/useExternalDatastream: $$EXTERNAL_DS/" lrp.config.yaml; \
+			sed -i "s/^user:.*/user: $$USER_NAME/" lrp.config.yaml; \
+			sed -i "s/^portDiff:.*/portDiff: $$PORT_DIFF/" lrp.config.yaml; \
 			if ! grep -q "^fromBatchNumber:" lrp.config.yaml; then echo "fromBatchNumber: $$FROM_BATCH_NO" >> lrp.config.yaml; fi; \
 			if ! grep -q "^toBatchNumber:" lrp.config.yaml; then echo "toBatchNumber: $$TO_BATCH_NO" >> lrp.config.yaml; fi; \
 			if ! grep -q "^useExternalDatastream:" lrp.config.yaml; then echo "useExternalDatastream: $$EXTERNAL_DS" >> lrp.config.yaml; fi; \
+			if ! grep -q "^user:" lrp.config.yaml; then echo "user: $$USER_NAME" >> lrp.config.yaml; fi; \
+			if ! grep -q "^portDiff:" lrp.config.yaml; then echo "portDiff: $$PORT_DIFF" >> lrp.config.yaml; fi; \
 		fi; \
 	fi
 
@@ -233,13 +256,17 @@ lrp-config-apply:
 		sed -i "s/--zkevm.sequencer-resequence-external-datastream=\(true\|false\)/--zkevm.sequencer-resequence-external-datastream=$$EXTERNAL_DS/" docker-compose-lrp.yml; \
 	fi
 
+.PHONY: lrp-build-docker
+lrp-build-docker: # Build cdk-erigoin for lrp
+	@docker build -t cdk-erigon:$(IMAGE_TAG) -f ../Dockerfile.local ../
+
 .PHONY: lrp-mainnet
-lrp-mainnet: build-docker lrp-config-apply
+lrp-mainnet: lrp-config-apply lrp-build-docker
 	$(RUN_DOCKER_MAINNET_LRP_UNWIND)
-	docker wait $(DOCKER_MAINNET_LRP_UNWIND_CONTAINER)
+	@docker wait $(DOCKER_MAINNET_LRP_UNWIND_CONTAINER); \
 	docker logs $(DOCKER_MAINNET_LRP_UNWIND_CONTAINER) > $(UNWIND_LOG_FILE) 2>&1
-	# $(RUN_DOCKER_LRP_STATELESS_EXECUTOR)
-	# sleep 3
+	@# $(RUN_DOCKER_LRP_STATELESS_EXECUTOR)
+	@# sleep 3
 	@EXTERNAL_DS=$$(awk '/^useExternalDatastream:/ {print $$2}' lrp.config.yaml); \
 	if [ "$$EXTERNAL_DS" = "true" ]; then \
 		$(RUN_DOCKER_MAINNET_LRP_RESEQUENCE_WITH_EXTERNAL_DATASTREAM); \
@@ -248,15 +275,15 @@ lrp-mainnet: build-docker lrp-config-apply
 	fi
 
 .PHONY: lrp-mainnet-unwind
-lrp-mainnet-unwind: build-docker lrp-config-apply
+lrp-mainnet-unwind: lrp-config-apply lrp-build-docker
 	$(RUN_DOCKER_MAINNET_LRP_UNWIND)
-	docker wait $(DOCKER_MAINNET_LRP_UNWIND_CONTAINER)
+	@docker wait $(DOCKER_MAINNET_LRP_UNWIND_CONTAINER); \
 	docker logs $(DOCKER_MAINNET_LRP_UNWIND_CONTAINER) > $(UNWIND_LOG_FILE) 2>&1
 
 .PHONY: lrp-mainnet-resequence
-lrp-mainnet-resequence: build-docker lrp-config-apply
-	# $(RUN_DOCKER_LRP_STATELESS_EXECUTOR)
-	# sleep 3
+lrp-mainnet-resequence: lrp-config-apply lrp-build-docker
+	@# $(RUN_DOCKER_LRP_STATELESS_EXECUTOR)
+	@# sleep 3
 	@EXTERNAL_DS=$$(awk '/^useExternalDatastream:/ {print $$2}' lrp.config.yaml); \
 	if [ "$$EXTERNAL_DS" = "true" ]; then \
 		$(RUN_DOCKER_MAINNET_LRP_RESEQUENCE_WITH_EXTERNAL_DATASTREAM); \
@@ -314,10 +341,12 @@ lrp-mainnet-data-compact:
 
 .PHONY: lrp-mainnet-tps
 lrp-mainnet-tps: # Filter logs for LRP & Compute TPS
-	docker logs $(DOCKER_MAINNET_LRP_RESEQUENCE_CONTAINER) > $(RESEQUENCE_LOG_FILE) 2>&1
-	docker logs $(DOCKER_MAINNET_LRP_RESEQUENCE_CONTAINER) 2>&1 | grep "\[5/13 Execution\]" > $(RESEQUENCE_FILTERED_LOG_FILE)
+	@docker logs $(DOCKER_MAINNET_LRP_RESEQUENCE_CONTAINER) > $(RESEQUENCE_LOG_FILE) 2>&1; \
+	docker logs $(DOCKER_MAINNET_LRP_RESEQUENCE_CONTAINER) 2>&1 | grep "\[5/13 Execution\]" > $(RESEQUENCE_FILTERED_LOG_FILE); \
 	python process_log.py $(RESEQUENCE_FILTERED_LOG_FILE)
 
 .PHONY: lrp-stop
 lrp-stop:
-	$(STOP_LRP)
+	@docker ps -a | grep "$(USER_PREFIX)-xlayer" | cut -d' ' -f1 | xargs -r docker stop; \
+	docker ps -a | grep "$(USER_PREFIX)-xlayer" | cut -d' ' -f1 | xargs -r docker rm -f; \
+	docker network rm $(USER_PREFIX)-erigon-lrp 2>/dev/null || true

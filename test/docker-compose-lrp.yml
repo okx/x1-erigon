@@ -1,11 +1,10 @@
-version: "3.5"
 networks:
   default:
-    name: erigon-lrp
+    name: ${USER_PREFIX:-default}-erigon-lrp
 services:
   xlayer-mainnet-lrp-unwind:
-    container_name: xlayer-mainnet-lrp-unwind
-    image: cdk-erigon
+    container_name: ${USER_PREFIX:-default}-xlayer-mainnet-lrp-unwind
+    image: cdk-erigon:${IMAGE_TAG}
     environment:
       - CDK_ERIGON_SEQUENCER=0
     volumes:
@@ -19,15 +18,15 @@ services:
         --unwind-batch-no=134484
 
   xlayer-mainnet-lrp-resequence:
-    container_name: xlayer-mainnet-lrp-resequence
-    image: cdk-erigon
+    container_name: ${USER_PREFIX:-default}-xlayer-mainnet-lrp-resequence
+    image: cdk-erigon:${IMAGE_TAG}
     environment:
       - CDK_ERIGON_SEQUENCER=1
     ports:
-      - 6060:6060
-      - 8126:8545
-      - 6902:6900
-      - 9093:9095
+      - ${PPROF_PORT}:6060
+      - ${RPC_PORT}:8545
+      - ${DS_PORT}:6900
+      - ${METRICS_PORT}:9095
     volumes:
       - ./mainnet/seq:/home/erigon/data/
       - ./config/xlayerconfig-mainnet.yaml:/usr/src/app/config.yaml
@@ -37,11 +36,11 @@ services:
       cdk-erigon --zkevm.sequencer-resequence=true --zkevm.sequencer-resequence-halt-on-batch-number=134550 --http.vhosts=* --http.corsdomain=* --ws --config=/usr/src/app/config.yaml
 
   xlayer-mainnet-lrp-resequence-with-external-datastream:
-    container_name: xlayer-mainnet-lrp-resequence
-    image: cdk-erigon
+    container_name: ${USER_PREFIX:-default}-xlayer-mainnet-lrp-resequence
+    image: cdk-erigon:${IMAGE_TAG}
     extends: xlayer-mainnet-lrp-resequence
     ports:
-      - 16902:16900
+      - ${EXTERNAL_DS_PORT}:16900
     volumes:
       - ./external_ds/data-stream.bin:/home/data-stream.bin
       - ./external_ds/data-stream.db:/home/data-stream.db/
@@ -51,7 +50,7 @@ services:
       cdk-erigon --zkevm.sequencer-resequence=true --zkevm.sequencer-resequence-halt-on-batch-number=134550 --zkevm.sequencer-resequence-external-datastream=true --http.vhosts=* --http.corsdomain=* --ws --config=/usr/src/app/config.yaml
 
   xlayer-executor:
-    container_name: xlayer-executor
+    container_name: ${USER_PREFIX:-default}:-xlayer-executor
     image: hermeznetwork/zkevm-prover:v9.0.0-RC1-fork.13
     platform: linux/amd64
     environment:
