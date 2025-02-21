@@ -51,7 +51,7 @@ func (s *SMT) InsertBatch(cfg InsertBatchConfig, nodeKeys []*utils.NodeKey, node
 		nodeHashesForDelete       = make(map[uint64]map[uint64]map[uint64]map[uint64]*utils.NodeKey)
 	)
 
-	//BE CAREFUL: modifies the arrays
+	// BE CAREFUL: modifies the arrays
 	if err := s.preprocessBatchedNodeValues(
 		cfg.logPrefix,
 		cfg.shouldPrintProgress,
@@ -63,7 +63,7 @@ func (s *SMT) InsertBatch(cfg InsertBatchConfig, nodeKeys []*utils.NodeKey, node
 		return nil, fmt.Errorf("preprocessBatchedNodeValues: %w", err)
 	}
 
-	//DO NOT MOVE ABOVE PREPROCESS
+	// DO NOT MOVE ABOVE PREPROCESS
 	size = len(nodeKeys)
 
 	progressChan, stopProgressPrinter := getProgressPrinterPre(cfg.logPrefix, "process", uint64(size), cfg.shouldPrintProgress)
@@ -118,19 +118,12 @@ func (s *SMT) InsertBatch(cfg InsertBatchConfig, nodeKeys []*utils.NodeKey, node
 				if insertingPointerToSmtBatchNode, err = (*insertingPointerToSmtBatchNode).createALeafInEmptyDirection(insertingNodePath, insertingNodePathLevel, insertingNodeKey); err != nil {
 					return nil, err
 				}
-				// EXPLAIN THE LINE BELOW: there is no need to update insertingRemainingKey because it is not needed anymore therefore its value is incorrect if used after this line
-				// insertingRemainingKey = *((*insertingPointerToSmtBatchNode).nodeLeftKeyOrRemainingKey)
 				insertingNodePathLevel++
 			}
 
-			// EXPLAIN THE LINE BELOW: cannot delete the old values because it might be used as a value of an another node
-			// updateNodeHashesForDelete(nodeHashesForDelete, []*utils.NodeKey{(*insertingPointerToSmtBatchNode).nodeRightHashOrValueHash})
 			(*insertingPointerToSmtBatchNode).nodeRightHashOrValueHash = (*utils.NodeKey)(insertingNodeValueHash)
 		} else {
 			if (*insertingPointerToSmtBatchNode).nodeLeftHashOrRemainingKey.IsEqualTo(insertingRemainingKey) {
-				// EXPLAIN THE LINE BELOW: cannot delete the old values because it might be used as a value of an another node
-				// updateNodeHashesForDelete(nodeHashesForDelete, []*utils.NodeKey{(*insertingPointerToSmtBatchNode).nodeRightHashOrValueHash})
-
 				parentAfterDelete := &((*insertingPointerToSmtBatchNode).parentNode)
 				*insertingPointerToSmtBatchNode = nil
 				insertingPointerToSmtBatchNode = parentAfterDelete
@@ -138,22 +131,17 @@ func (s *SMT) InsertBatch(cfg InsertBatchConfig, nodeKeys []*utils.NodeKey, node
 					(*insertingPointerToSmtBatchNode).updateHashesAfterDelete()
 				}
 				insertingNodePathLevel--
-				// EXPLAIN THE LINE BELOW: there is no need to update insertingRemainingKey because it is not needed anymore therefore its value is incorrect if used after this line
-				// insertingRemainingKey = utils.RemoveKeyBits(*insertingNodeKey, insertingNodePathLevel)
 			}
 
 			for {
-				// the root node has been deleted so we can safely break
 				if *insertingPointerToSmtBatchNode == nil {
 					break
 				}
 
-				// a leaf (with mismatching remaining key) => nothing to collapse
 				if (*insertingPointerToSmtBatchNode).isLeaf() {
 					break
 				}
 
-				// does not have a single leaf => nothing to collapse
 				theSingleNodeLeaf, theSingleNodeLeafDirection := (*insertingPointerToSmtBatchNode).getTheSingleLeafAndDirectionIfAny()
 				if theSingleNodeLeaf == nil {
 					break
@@ -168,24 +156,38 @@ func (s *SMT) InsertBatch(cfg InsertBatchConfig, nodeKeys []*utils.NodeKey, node
 			maxInsertingNodePathLevel = insertingNodePathLevel
 		}
 	}
+
 	select {
 	case *progressChan <- uint64(1):
 	default:
 	}
 	stopProgressPrinter()
 
-	if err := s.updateDepth(maxInsertingNodePathLevel); err != nil {
-		return nil, fmt.Errorf("updateDepth: %w", err)
-	}
+	// 使用 WaitGroup 和 channel 来并行执行操作
+	var wg sync.WaitGroup
+	errCh := make(chan error, 1) // 用来收集并行操作中的错误
 
-	if err := s.deleteBatchedNodeValues(cfg.logPrefix, nodeHashesForDelete); err != nil {
-		return nil, fmt.Errorf("deleteBatchedNodeValues: %w", err)
-	}
+	// 1. Update Depth
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := s.updateDepth(maxInsertingNodePathLevel); err != nil {
+			errCh <- fmt.Errorf("updateDepth: %w", err)
+			return
+		}
 
-	if err := s.saveBatchedNodeValues(cfg.logPrefix, nodeValues, nodeValuesHashes); err != nil {
-		return nil, fmt.Errorf("saveBatchedNodeValues: %w", err)
-	}
+		if err := s.deleteBatchedNodeValues(cfg.logPrefix, nodeHashesForDelete); err != nil {
+			errCh <- fmt.Errorf("deleteBatchedNodeValues: %w", err)
+			return
+		}
 
+		if err := s.saveBatchedNodeValues(cfg.logPrefix, nodeValues, nodeValuesHashes); err != nil {
+			errCh <- fmt.Errorf("saveBatchedNodeValues: %w", err)
+			return
+		}
+	}()
+
+	// 4. Calculate and Save Hashes Dfs (此操作保持在主线程外部)
 	if smtBatchNodeRoot == nil {
 		rootNodeHash = &utils.NodeKey{0, 0, 0, 0}
 	} else {
@@ -205,6 +207,17 @@ func (s *SMT) InsertBatch(cfg InsertBatchConfig, nodeKeys []*utils.NodeKey, node
 		}
 		sdh.wg.Wait()
 	}
+
+	// 等待所有并行操作完成
+	wg.Wait()
+
+	// 检查是否有错误发生
+	select {
+	case err := <-errCh:
+		return nil, err
+	default:
+	}
+
 	if err := s.setLastRoot(*rootNodeHash); err != nil {
 		return nil, err
 	}
