@@ -1495,7 +1495,7 @@ var (
 	YieldSizeFlag = cli.Uint64Flag{
 		Name:  "yieldsize",
 		Usage: "transaction count fetched from txpool each time",
-		Value: 30,
+		Value: 1000,
 	}
 )
 

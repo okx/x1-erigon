@@ -3,11 +3,9 @@ import argparse
 import logging
 from datetime import datetime
 
-# 配置日志记录
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def parse_time(line):
-    # 假设时间戳在行的开头，格式为 [MM-DD|HH:MM:SS.SSS]
     match = re.search(r'\[(\d{2}-\d{2}\|\d{2}:\d{2}:\d{2}\.\d{3})\]', line)
     if match:
         current_year = datetime.now().year
@@ -29,17 +27,14 @@ def main(log_file):
             logging.error("Log file does not contain enough lines.")
             return
 
-        # 读取 lastBatch 和 highestBatchInDataStream
         last_batch = int(re.search(r'Last batch (\d+)', lines[0]).group(1))
         # highest_batch_in_data_stream = int(re.search(r'highest batch in datastream (\d+)', lines[0]).group(1))
         halt_batch = int(re.search(r'resequencing from batch \d+ to (\d+)', lines[0]).group(1))
 
-        # 计算启动时间
         first_line_time = parse_time(lines[0])
         second_line_time = parse_time(lines[1])
         startup_duration = (second_line_time - first_line_time).total_seconds()
 
-        # 找到 startTime
         for i, line in enumerate(lines):
             if "Resequence from batch" in line and "in data stream" in line:
                 start_time = parse_time(line)
@@ -49,7 +44,6 @@ def main(log_file):
             logging.error("Start time not found.")
             return
 
-        # 计算 txCount
         for line in lines[i:]:
             if "Finish block" in line:
                 match = re.search(r'Finish block \d+ with (\d+) transactions', line)
@@ -63,7 +57,6 @@ def main(log_file):
             logging.error("End time not found.")
             return
 
-        # 计算 TPS
         duration = (end_time - start_time).total_seconds()
         tps = tx_count / duration if duration > 0 else 0
 
