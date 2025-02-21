@@ -7,7 +7,7 @@ zkevm.l2-sequencer-rpc-url: https://rpc.xlayer.tech
 zkevm.l2-datastreamer-url: stream.xlayer.tech:8800
 zkevm.l1-chain-id: 1
 #zkevm.l1-rpc-url: https://rpc.ankr.com/eth/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-zkevm.l1-rpc-url: https://rpc.ankr.com/eth/578c95407e7831f0ac1ef79cacae294dc9bf8307121ca9fffaf1e556a5cca662
+zkevm.l1-rpc-url: https://rpc.ankr.com/eth
 #zkevm.increment-tree-always: true
 
 #debug.limit: 8554110
