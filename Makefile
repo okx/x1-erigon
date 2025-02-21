@@ -28,6 +28,11 @@ CGO_CFLAGS += -D__BLST_PORTABLE__
 CGO_CFLAGS += -Wno-unknown-warning-option -Wno-enum-int-mismatch -Wno-strict-prototypes -Wno-unused-but-set-variable
 
 CGO_LDFLAGS := $(shell $(GO) env CGO_LDFLAGS 2> /dev/null)
+ifeq ($(MALLOC), jemalloc)
+    CGO_LDFLAGS += -ljemalloc
+else ifeq ($(MALLOC), tcmalloc)
+    CGO_LDFLAGS += -ltcmalloc_minimal
+endif
 ifeq ($(shell uname -s), Darwin)
 	ifeq ($(filter-out 13.%,$(shell sw_vers --productVersion)),)
 		CGO_LDFLAGS += -mmacosx-version-min=13.3
@@ -123,6 +128,7 @@ endif
 
 ## erigon:                            build erigon
 cdk-erigon: go-version cdk-erigon.cmd
+	@echo "CGO_LDFLAGS updated -> $(CGO_LDFLAGS)"
 	@rm -f $(GOBIN)/tg # Remove old binary to prevent confusion where users still use it because of the scripts
 
 COMMANDS += devnet
@@ -380,3 +386,12 @@ help	:	Makefile
 
 build-docker: ## X Layer Builds a docker image with the binary
 	docker build -t cdk-erigon -f ./Dockerfile.local .
+
+.PHONY: mem
+
+mem:
+	@if [ "$(MALLOC)" = "jemalloc" ]; then \
+	    bash ./libs/malloc/je_install.sh; \
+	elif [ "$(MALLOC)" = "tcmalloc" ]; then \
+	    bash ./libs/malloc/tc_install.sh; \
+	fi
