@@ -194,7 +194,7 @@ func (s *SMT) InsertBatch(cfg InsertBatchConfig, nodeKeys []*utils.NodeKey, node
 		go func() {
 			defer sdh.destroy()
 
-			calculateAndSaveHashesDfs(sdh, smtBatchNodeRoot, make([]int, 256), 0)
+			calculateAndSaveHashesDfs(sdh, smtBatchNodeRoot)
 			rootNodeHash = (*utils.NodeKey)(smtBatchNodeRoot.hash)
 		}()
 
@@ -444,6 +444,11 @@ func (s *SMT) findInsertingPoint(
 		nextInsertingPointerNodeHash         *utils.NodeKey
 	)
 
+	// 辅助函数：将 NodeKey 转换为 BigInt 字符串
+	toBigIntString := func(nodeKey *utils.NodeKey) string {
+		return nodeKey.ToBigInt().String()
+	}
+
 	for {
 		if (*insertingPointerToSmtBatchNode) == nil { // 从数据库更新内存结构
 			if !insertingPointerNodeHash.IsZero() {
@@ -451,10 +456,12 @@ func (s *SMT) findInsertingPoint(
 				if err != nil {
 					return -2, insertingPointerToSmtBatchNode, visitedNodeHashes, err
 				}
-				// 记录访问的节点，避免重复添加
-				if _, exists := visitedNodeMap[insertingPointerNodeHash.ToBigInt().String()]; !exists {
+
+				// 使用 ToBigInt() 进行去重操作
+				nodeHashStr := toBigIntString(insertingPointerNodeHash)
+				if _, exists := visitedNodeMap[nodeHashStr]; !exists {
 					visitedNodeHashes = append(visitedNodeHashes, insertingPointerNodeHash)
-					visitedNodeMap[insertingPointerNodeHash.ToBigInt().String()] = struct{}{}
+					visitedNodeMap[nodeHashStr] = struct{}{}
 				}
 			} else {
 				if insertingNodePathLevel != -1 {
@@ -485,19 +492,21 @@ func (s *SMT) findInsertingPoint(
 			}
 
 			// 记录访问的兄弟节点，避免重复添加
-			if _, exists := visitedNodeMap[(*insertingPointerToSmtBatchNode).nodeLeftHashOrRemainingKey.ToBigInt().String()]; !exists {
+			leftHashStr := toBigIntString((*insertingPointerToSmtBatchNode).nodeLeftHashOrRemainingKey)
+			if _, exists := visitedNodeMap[leftHashStr]; !exists {
 				visitedNodeHashes = append(visitedNodeHashes, (*insertingPointerToSmtBatchNode).nodeLeftHashOrRemainingKey)
-				visitedNodeMap[(*insertingPointerToSmtBatchNode).nodeLeftHashOrRemainingKey.ToBigInt().String()] = struct{}{}
+				visitedNodeMap[leftHashStr] = struct{}{}
 			}
 
-			if _, exists := visitedNodeMap[(*insertingPointerToSmtBatchNode).nodeRightHashOrValueHash.ToBigInt().String()]; !exists {
+			rightHashStr := toBigIntString((*insertingPointerToSmtBatchNode).nodeRightHashOrValueHash)
+			if _, exists := visitedNodeMap[rightHashStr]; !exists {
 				visitedNodeHashes = append(visitedNodeHashes, (*insertingPointerToSmtBatchNode).nodeRightHashOrValueHash)
-				visitedNodeMap[(*insertingPointerToSmtBatchNode).nodeRightHashOrValueHash.ToBigInt().String()] = struct{}{}
+				visitedNodeMap[rightHashStr] = struct{}{}
 			}
 		}
 
 		insertDirection := insertingNodePath[insertingNodePathLevel]
-		// 合并获取下一个节点的计算
+		// 使用 getNextNodeInfo 获取下一个节点的哈希和指针
 		nextInsertingPointerNodeHash, nextInsertingPointerToSmtBatchNode = (*insertingPointerToSmtBatchNode).getNextNodeInfo(insertDirection)
 
 		if nextInsertingPointerNodeHash.IsZero() && (*nextInsertingPointerToSmtBatchNode) == nil {
@@ -543,48 +552,63 @@ func updateNodeHashesForDelete(
 }
 
 // no point to parallelize this function because db consumer is slower than this producer
-func calculateAndSaveHashesDfs(
-	sdh *smtDfsHelper,
-	smtBatchNode *smtBatchNode,
-	path []int,
-	level int,
-) {
-	if smtBatchNode.isLeaf() {
-		hashObj, hashValue := utils.HashKeyAndValueByPointers(utils.ConcatArrays4ByPointers(smtBatchNode.nodeLeftHashOrRemainingKey.AsUint64Pointer(), smtBatchNode.nodeRightHashOrValueHash.AsUint64Pointer()), &utils.LeafCapacity)
-		smtBatchNode.hash = hashObj
+func calculateAndSaveHashesDfs(sdh *smtDfsHelper, root *smtBatchNode) {
+	type stackItem struct {
+		node  *smtBatchNode
+		path  []int
+		level int
+	}
+
+	stack := make([]stackItem, 0, 512)                          // 预分配栈，减少扩容
+	stack = append(stack, stackItem{root, make([]int, 128), 0}) // 假设最大深度64
+
+	for len(stack) > 0 {
+		item := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+
+		node := item.node
+		path := item.path
+		level := item.level
+
+		if node.isLeaf() {
+			// 直接在叶子节点计算哈希，避免不必要的拷贝
+			hashObj, hashValue := utils.HashKeyAndValueByPointers(
+				utils.ConcatArrays4ByPointers(node.nodeLeftHashOrRemainingKey.AsUint64Pointer(),
+					node.nodeRightHashOrValueHash.AsUint64Pointer()), &utils.LeafCapacity)
+			node.hash = hashObj
+
+			if !sdh.s.noSaveOnInsert {
+				sdh.dataChan <- newSmtDfsHelperDataStruct(hashObj, hashValue)
+				sdh.dataChan <- newSmtDfsHelperDataStruct(hashObj, utils.JoinKey(path[:level], *node.nodeLeftHashOrRemainingKey))
+			}
+			continue
+		}
+
+		// 计算内部节点哈希
+		var totalHash utils.NodeValue8
+
+		if node.rightNode != nil {
+			path[level] = 1
+			stack = append(stack, stackItem{node.rightNode, path, level + 1})
+		} else {
+			totalHash.SetHalfValue(*node.nodeRightHashOrValueHash, 1)
+		}
+
+		if node.leftNode != nil {
+			path[level] = 0
+			stack = append(stack, stackItem{node.leftNode, path, level + 1})
+		} else {
+			totalHash.SetHalfValue(*node.nodeLeftHashOrRemainingKey, 0)
+		}
+
+		// 计算当前节点的哈希
+		hashObj, hashValue := utils.HashKeyAndValueByPointers(totalHash.ToUintArrayByPointer(), &utils.BranchCapacity)
+		node.hash = hashObj
+
 		if !sdh.s.noSaveOnInsert {
 			sdh.dataChan <- newSmtDfsHelperDataStruct(hashObj, hashValue)
-
-			nodeKey := utils.JoinKey(path[:level], *smtBatchNode.nodeLeftHashOrRemainingKey)
-			sdh.dataChan <- newSmtDfsHelperDataStruct(hashObj, nodeKey)
 		}
-		return
 	}
-
-	var totalHash utils.NodeValue8
-
-	if smtBatchNode.leftNode != nil {
-		path[level] = 0
-		calculateAndSaveHashesDfs(sdh, smtBatchNode.leftNode, path, level+1)
-		totalHash.SetHalfValue(*smtBatchNode.leftNode.hash, 0) // no point to check for error because we used hardcoded 0 which ensures that no error will be returned
-	} else {
-		totalHash.SetHalfValue(*smtBatchNode.nodeLeftHashOrRemainingKey, 0) // no point to check for error because we used hardcoded 0 which ensures that no error will be returned
-	}
-
-	if smtBatchNode.rightNode != nil {
-		path[level] = 1
-		calculateAndSaveHashesDfs(sdh, smtBatchNode.rightNode, path, level+1)
-		totalHash.SetHalfValue(*smtBatchNode.rightNode.hash, 1) // no point to check for error because we used hardcoded 1 which ensures that no error will be returned
-	} else {
-		totalHash.SetHalfValue(*smtBatchNode.nodeRightHashOrValueHash, 1) // no point to check for error because we used hardcoded 1 which ensures that no error will be returned
-	}
-
-	hashObj, hashValue := utils.HashKeyAndValueByPointers(totalHash.ToUintArrayByPointer(), &utils.BranchCapacity)
-	if !sdh.s.noSaveOnInsert {
-		sdh.dataChan <- newSmtDfsHelperDataStruct(hashObj, hashValue)
-	}
-
-	smtBatchNode.hash = hashObj
 }
 
 type smtBatchNode struct {
