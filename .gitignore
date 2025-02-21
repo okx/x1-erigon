@@ -118,8 +118,8 @@ start.sh
 xlayerconfig-testnet.yaml
 **/cover.out
 **/cover.html
-test/mainnet
-test/external_ds
+test/lrp/mainnet
+test/lrp/external_ds
 test/*.zip
 test/*.tar.gz
 

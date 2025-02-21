@@ -1,6 +1,6 @@
+user: oker
+portDiff: 5
 fromBatchNumber: 134485
 toBatchNumber: 134550
 useExternalDatastream: true
 srcMainnetDataPath: $HOME/Downloads/mainnet/seq
-user: oker
-portDiff: 5
