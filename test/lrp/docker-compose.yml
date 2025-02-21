@@ -15,7 +15,7 @@ services:
         --config=/usr/src/app/config.yaml \
         --chain xlayer-mainnet \
         --datadir /home/erigon/data/ \
-        --unwind-batch-no=134484
+        --unwind-batch-no=134482
 
   xlayer-mainnet-lrp-resequence:
     container_name: ${USER_PREFIX:-default}-xlayer-mainnet-lrp-resequence
@@ -33,7 +33,7 @@ services:
     profiles:
       - internal-ds
     command: >
-      cdk-erigon --zkevm.sequencer-resequence=true --zkevm.sequencer-resequence-halt-on-batch-number=134550 --http.vhosts=* --http.corsdomain=* --ws --config=/usr/src/app/config.yaml
+      cdk-erigon --zkevm.sequencer-resequence=true --zkevm.sequencer-resequence-halt-on-batch-number=134490 --http.vhosts=* --http.corsdomain=* --ws --config=/usr/src/app/config.yaml
 
   xlayer-mainnet-lrp-resequence-with-external-datastream:
     container_name: ${USER_PREFIX:-default}-xlayer-mainnet-lrp-resequence
@@ -47,7 +47,7 @@ services:
     profiles:
       - external-ds
     command: >
-      cdk-erigon --zkevm.sequencer-resequence=true --zkevm.sequencer-resequence-halt-on-batch-number=134550 --zkevm.sequencer-resequence-external-datastream=true --http.vhosts=* --http.corsdomain=* --ws --config=/usr/src/app/config.yaml
+      cdk-erigon --zkevm.sequencer-resequence=true --zkevm.sequencer-resequence-halt-on-batch-number=134490 --zkevm.sequencer-resequence-external-datastream=true --http.vhosts=* --http.corsdomain=* --ws --config=/usr/src/app/config.yaml
 
   xlayer-executor:
     container_name: ${USER_PREFIX:-default}:-xlayer-executor
