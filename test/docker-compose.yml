@@ -397,7 +397,8 @@ services:
 
   proxyd:
     image: liudisteven/proxyd:1.0
+    container_name: xlayer-proxyd 
     ports:
-      - "8080:8080"
+      - "7002:7002"
     volumes:
-    - ./config/proxyd.toml:/etc/proxyd/proxyd.toml
+      - ./config/proxyd.toml:/etc/proxyd/proxyd.toml 

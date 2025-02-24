@@ -1,22 +1,98 @@
-# 简化后的 proxyd.toml
-
 [server]
-rpc_port = 8080  
+# Host for the proxyd RPC server to listen on.
+rpc_host = "0.0.0.0"
+# Port for the above.
+rpc_port = 7002
+# Host for the proxyd WS server to listen on.
+ws_host = "0.0.0.0"
+# Port for the above
+# Set the ws_port to 0 to disable WS
+ws_port = 0
+# Maximum client body size, in bytes, that the server will accept.
+max_body_size_bytes = 10485760
+max_concurrent_rpcs = 1000
+# Server log level
 log_level = "info"
+allow_all_origins = true
 
+[redis]
+# URL to a Redis instance.
+url = ""
+
+[metrics]
+# Whether or not to enable Prometheus metrics.
+enabled = true
+# Host for the Prometheus metrics endpoint to listen on.
+host = "0.0.0.0"
+# Port for the above.
+port = 9761
+
+[cache]
+enabled = false
+ttl = "1s"
 
 [backend]
-response_timeout_seconds = 5 
-max_retries = 3 
+# How long proxyd should wait for a backend response before timing out.
+response_timeout_seconds = 5
+# Maximum response size, in bytes, that proxyd will accept from a backend.
+max_response_size_bytes = 10485760
+# Maximum number of times proxyd will try a backend before giving up.
+max_retries = 3
+# Number of seconds to wait before trying an unhealthy backend again.
+out_of_service_seconds = 600
+# Maximum latency accepted to serve requests, default 10s
+max_latency_threshold = "30s"
+# Maximum latency accepted to serve requests before degraded, default 5s
+max_degraded_latency_threshold = "10s"
+# Maximum error rate accepted to serve requests, default 0.5 (i.e. 50%)
+max_error_rate_threshold = 0.3
+consensus_skip_peer_count = true
 
 [backends]
-  [backends.mybackend] 
-  rpc_url = "http://localhost:8124" 
+[backends.egin-1]
+# The URL to contact the backend at. Will be read from the environment
+# if an environment variable prefixed with $ is provided.
+rpc_url = "http://xlayer-rpc:8545"
+max_rps = 3
+consensus_skip_peer_count = true
 
-[backend_groups]
-  [backend_groups.main] 
-  backends = ["mybackend"] 
+[backend_groups.default]
+backends = ["egin-1"]
+routing_strategy = "fallback"
 
+# Mapping of methods to backend groups.
 [rpc_method_mappings]
-eth_call = "main" 
-eth_chainId = "main" 
+eth_call = "default"
+eth_blockNumber = "default"
+eth_getBalance = "default"
+eth_sendRawTransaction = "default"
+eth_getBlockByNumber = "default"
+eth_getTransactionCount = "default"
+eth_getInternalTransactions = "default"
+eth_getTransactionByHash = "default"
+eth_getBlockByHash = "default"
+eth_getTransactionReceipt = "default"
+eth_chainId = "default"
+net_version = "default"
+eth_gasPrice = "default"
+eth_estimateGas = "default"
+eth_getCode = "default"
+eth_feeHistory = "default"
+eth_maxPriorityFeePerGas = "default"
+eth_getLogs = "default"
+eth_syncing = "default"
+eth_getBlockTransactionCountByNumber = "default"
+eth_getStorageAt = "default"
+eth_minGasPrice = "default"
+debug_traceTransaction = "default"
+debug_traceCall = "default"
+trace_transaction = "default"
+zkevm_batchNumber = "default"
+zkevm_virtualBatchNumber = "default"
+zkevm_verifiedBatchNumber = "default"
+zkevm_getBatchSealTime = "default"
+zkevm_getBatchByNumber = "default"
+zkevm_getLatestGlobalExitRoot = "default"
+zkevm_getBatchDataByNumbers = "default"
+txpool_content = "default"
+web3_clientVersion = "default"
