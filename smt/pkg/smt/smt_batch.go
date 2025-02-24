@@ -3,6 +3,7 @@ package smt
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"sync"
 
 	"github.com/dgravesa/go-parallel/parallel"
@@ -517,50 +518,1052 @@ func updateNodeHashesForDelete(
 	}
 }
 
-// no point to parallelize this function because db consumer is slower than this producer
+//func calculateAndSaveHashesDfs(
+//	sdh *smtDfsHelper,
+//	smtBatchRootNode *smtBatchNode,
+//	path []int,
+//	initialLevel int,
+//) {
+//	type stackFrame struct {
+//		node  *smtBatchNode
+//		level uint16 // 使用更小的类型
+//		state byte   // 使用 byte 替代 int
+//	}
+//
+//	// 预分配栈并尽量减少扩容
+//	stack := make([]stackFrame, 0, 1024)
+//	stack = append(stack, stackFrame{node: smtBatchRootNode, level: uint16(initialLevel), state: 0})
+//	noSave := sdh.s.noSaveOnInsert
+//	dataChan := sdh.dataChan // 缓存通道引用
+//
+//	for len(stack) > 0 {
+//		frameIdx := len(stack) - 1
+//		frame := &stack[frameIdx]
+//
+//		node := frame.node
+//		if node.isLeaf() {
+//			concat := utils.ConcatArrays4ByPointers(
+//				node.nodeLeftHashOrRemainingKey.AsUint64Pointer(),
+//				node.nodeRightHashOrValueHash.AsUint64Pointer(),
+//			)
+//			hashObj, hashValue := utils.HashKeyAndValueByPointers(concat, &utils.LeafCapacity)
+//			node.hash = hashObj
+//
+//			if !noSave {
+//				leafKey := utils.JoinKey(path[:frame.level], *node.nodeLeftHashOrRemainingKey)
+//				buffer := newSmtDfsHelperDataStruct(hashObj, hashValue)
+//				dataChan <- buffer
+//				dataChan <- newSmtDfsHelperDataStruct(hashObj, leafKey)
+//			}
+//			stack = stack[:frameIdx]
+//			continue
+//		}
+//
+//		var totalHash utils.NodeValue8
+//
+//		switch frame.state {
+//		case 0:
+//			path[frame.level] = 0
+//			if left := node.leftNode; left != nil {
+//				frame.state = 1
+//				stack = append(stack, stackFrame{node: left, level: frame.level + 1})
+//			} else {
+//				totalHash.SetHalfValue(*node.nodeLeftHashOrRemainingKey, 0)
+//				frame.state = 1
+//			}
+//
+//		case 1:
+//			path[frame.level] = 1
+//			if right := node.rightNode; right != nil {
+//				frame.state = 2
+//				stack = append(stack, stackFrame{node: right, level: frame.level + 1})
+//			} else {
+//				totalHash.SetHalfValue(*node.nodeRightHashOrValueHash, 1)
+//				frame.state = 2
+//			}
+//
+//		case 2:
+//			if left := node.leftNode; left != nil {
+//				totalHash.SetHalfValue(*left.hash, 0)
+//			} else {
+//				totalHash.SetHalfValue(*node.nodeLeftHashOrRemainingKey, 0)
+//			}
+//			if right := node.rightNode; right != nil {
+//				totalHash.SetHalfValue(*right.hash, 1)
+//			} else {
+//				totalHash.SetHalfValue(*node.nodeRightHashOrValueHash, 1)
+//			}
+//
+//			hashObj, hashValue := utils.HashKeyAndValueByPointers(totalHash.ToUintArrayByPointer(), &utils.BranchCapacity)
+//			node.hash = hashObj
+//
+//			if !noSave {
+//				dataChan <- newSmtDfsHelperDataStruct(hashObj, hashValue)
+//			}
+//			stack = stack[:frameIdx]
+//		}
+//	}
+//}
+
+//func calculateAndSaveHashesDfs(
+//	sdh *smtDfsHelper,
+//	smtBatchRootNode *smtBatchNode,
+//	path []int,
+//	initialLevel int,
+//) {
+//	type stackFrame struct {
+//		node  *smtBatchNode
+//		level int
+//		state int // 0: initial, 1: left processed, 2: right processed
+//	}
+//
+//	// 使用栈替代递归
+//	stack := make([]stackFrame, 0, 1024) // 预分配一些空间
+//	stack = append(stack, stackFrame{node: smtBatchRootNode, level: initialLevel, state: 0})
+//	noSave := sdh.s.noSaveOnInsert
+//
+//	for len(stack) > 0 {
+//		// 获取当前栈顶元素
+//		current := &stack[len(stack)-1]
+//
+//		if current.node.isLeaf() {
+//			// 处理叶子节点
+//			hashObj, hashValue := utils.HashKeyAndValueByPointers(
+//				utils.ConcatArrays4ByPointers(
+//					current.node.nodeLeftHashOrRemainingKey.AsUint64Pointer(),
+//					current.node.nodeRightHashOrValueHash.AsUint64Pointer(),
+//				),
+//				&utils.LeafCapacity,
+//			)
+//			current.node.hash = hashObj
+//
+//			if !noSave {
+//				leafKey := utils.JoinKey(path[:current.level], *current.node.nodeLeftHashOrRemainingKey)
+//				buffer := newSmtDfsHelperDataStruct(hashObj, hashValue)
+//				sdh.dataChan <- buffer
+//				sdh.dataChan <- newSmtDfsHelperDataStruct(hashObj, leafKey)
+//			}
+//			stack = stack[:len(stack)-1] // 出栈
+//			continue
+//		}
+//
+//		var totalHash utils.NodeValue8
+//
+//		switch current.state {
+//		case 0: // 初始状态，处理左子节点
+//			path[current.level] = 0
+//			if current.node.leftNode != nil {
+//				current.state = 1
+//				stack = append(stack, stackFrame{node: current.node.leftNode, level: current.level + 1, state: 0})
+//			} else {
+//				totalHash.SetHalfValue(*current.node.nodeLeftHashOrRemainingKey, 0)
+//				current.state = 1
+//			}
+//
+//		case 1: // 处理右子节点
+//			path[current.level] = 1
+//			if current.node.rightNode != nil {
+//				current.state = 2
+//				stack = append(stack, stackFrame{node: current.node.rightNode, level: current.level + 1, state: 0})
+//			} else {
+//				totalHash.SetHalfValue(*current.node.nodeRightHashOrValueHash, 1)
+//				current.state = 2
+//			}
+//
+//		case 2: // 所有子节点处理完成，计算哈希
+//			// 如果左右子节点都已处理过，则从子节点获取哈希值
+//			if current.node.leftNode != nil {
+//				totalHash.SetHalfValue(*current.node.leftNode.hash, 0)
+//			} else {
+//				totalHash.SetHalfValue(*current.node.nodeLeftHashOrRemainingKey, 0)
+//			}
+//			if current.node.rightNode != nil {
+//				totalHash.SetHalfValue(*current.node.rightNode.hash, 1)
+//			} else {
+//				totalHash.SetHalfValue(*current.node.nodeRightHashOrValueHash, 1)
+//			}
+//
+//			hashObj, hashValue := utils.HashKeyAndValueByPointers(totalHash.ToUintArrayByPointer(), &utils.BranchCapacity)
+//			current.node.hash = hashObj
+//
+//			if !noSave {
+//				sdh.dataChan <- newSmtDfsHelperDataStruct(hashObj, hashValue)
+//			}
+//			stack = stack[:len(stack)-1] // 出栈
+//		}
+//	}
+//}
+
+//func calculateAndSaveHashesDfs(
+//	sdh *smtDfsHelper,
+//	smtBatchRootNode *smtBatchNode,
+//	path []int,
+//	level int,
+//) {
+//	// 内联叶子节点处理，减少函数调用开销
+//	if smtBatchRootNode.isLeaf() {
+//		// 直接组合左节点和右节点的哈希值
+//		hashObj, hashValue := utils.HashKeyAndValueByPointers(
+//			utils.ConcatArrays4ByPointers(
+//				smtBatchRootNode.nodeLeftHashOrRemainingKey.AsUint64Pointer(),
+//				smtBatchRootNode.nodeRightHashOrValueHash.AsUint64Pointer(),
+//			),
+//			&utils.LeafCapacity,
+//		)
+//		smtBatchRootNode.hash = hashObj
+//
+//		// 仅当未设置 noSaveOnInsert 标志时，才保存数据
+//		if !sdh.s.noSaveOnInsert {
+//			// 复用内存缓冲区，减少内存分配
+//			leafKey := utils.JoinKey(path[:level], *smtBatchRootNode.nodeLeftHashOrRemainingKey)
+//			buffer := newSmtDfsHelperDataStruct(hashObj, hashValue)
+//			sdh.dataChan <- buffer
+//			sdh.dataChan <- newSmtDfsHelperDataStruct(hashObj, leafKey)
+//		}
+//		return
+//	}
+//
+//	var totalHash utils.NodeValue8
+//	noSave := sdh.s.noSaveOnInsert // 缓存标志，避免每次循环都访问字段
+//
+//	// 遍历子节点，避免不必要的数组分配
+//	for i, child := range []*smtBatchNode{smtBatchRootNode.leftNode, smtBatchRootNode.rightNode} {
+//		path[level] = i
+//		if child != nil {
+//			// 递归处理子节点并合并哈希值
+//			calculateAndSaveHashesDfs(sdh, child, path, level+1)
+//			// 仅在遍历完所有子节点后，更新哈希值
+//			totalHash.SetHalfValue(*child.hash, i)
+//		} else {
+//			// 子节点为空时，直接使用默认哈希值
+//			defaultHash := smtBatchRootNode.nodeLeftHashOrRemainingKey
+//			if i == 1 {
+//				defaultHash = smtBatchRootNode.nodeRightHashOrValueHash
+//			}
+//			totalHash.SetHalfValue(*defaultHash, i)
+//		}
+//	}
+//
+//	// 一次性计算当前节点的总哈希值
+//	hashObj, hashValue := utils.HashKeyAndValueByPointers(totalHash.ToUintArrayByPointer(), &utils.BranchCapacity)
+//	smtBatchRootNode.hash = hashObj
+//
+//	// 如果 noSaveOnInsert 标志未设置，则保存数据
+//	if !noSave {
+//		sdh.dataChan <- newSmtDfsHelperDataStruct(hashObj, hashValue)
+//	}
+//}
+
+//func calculateAndSaveHashesDfs(
+//	sdh *smtDfsHelper,
+//	smtBatchRootNode *smtBatchNode,
+//	path []int,
+//	level int,
+//) {
+//	// Inline leaf node processing to reduce function call overhead
+//	if smtBatchRootNode.isLeaf() {
+//		// Directly combine the left and right hash for the leaf
+//		hashObj, hashValue := utils.HashKeyAndValueByPointers(
+//			utils.ConcatArrays4ByPointers(
+//				smtBatchRootNode.nodeLeftHashOrRemainingKey.AsUint64Pointer(),
+//				smtBatchRootNode.nodeRightHashOrValueHash.AsUint64Pointer(),
+//			),
+//			&utils.LeafCapacity,
+//		)
+//		smtBatchRootNode.hash = hashObj
+//
+//		// Only store if not set to skip saving
+//		if !sdh.s.noSaveOnInsert {
+//			// Reuse memory buffer, write once
+//			leafKey := utils.JoinKey(path[:level], *smtBatchRootNode.nodeLeftHashOrRemainingKey)
+//			buffer := newSmtDfsHelperDataStruct(hashObj, hashValue)
+//			sdh.dataChan <- buffer
+//			sdh.dataChan <- newSmtDfsHelperDataStruct(hashObj, leafKey)
+//		}
+//		return
+//	}
+//
+//	var totalHash utils.NodeValue8
+//	noSave := sdh.s.noSaveOnInsert // Cache flag to avoid frequent access
+//
+//	// Iterate directly over child nodes to minimize allocation of arrays
+//	for i, child := range []*smtBatchNode{smtBatchRootNode.leftNode, smtBatchRootNode.rightNode} {
+//		path[level] = i
+//		if child != nil {
+//			// Recursively process child and accumulate hash
+//			calculateAndSaveHashesDfs(sdh, child, path, level+1)
+//			// Accumulate the hash from child node
+//			totalHash.SetHalfValue(*child.hash, i)
+//		} else {
+//			// Handle missing child by using the default hash directly
+//			defaultHash := smtBatchRootNode.nodeLeftHashOrRemainingKey
+//			if i == 1 {
+//				defaultHash = smtBatchRootNode.nodeRightHashOrValueHash
+//			}
+//			totalHash.SetHalfValue(*defaultHash, i)
+//		}
+//	}
+//
+//	// Compute the final hash for the current node
+//	hashObj, hashValue := utils.HashKeyAndValueByPointers(totalHash.ToUintArrayByPointer(), &utils.BranchCapacity)
+//	smtBatchRootNode.hash = hashObj
+//
+//	// Avoid redundant checks by using cached noSave value
+//	if !noSave {
+//		sdh.dataChan <- newSmtDfsHelperDataStruct(hashObj, hashValue)
+//	}
+//}
+
+//func calculateAndSaveHashesDfs(
+//	sdh *smtDfsHelper,
+//	smtBatchRootNode *smtBatchNode,
+//	path []int,
+//	level int,
+//) {
+//	// 内联叶子节点处理，避免函数调用开销
+//	if smtBatchRootNode.isLeaf() {
+//		hashObj, hashValue := utils.HashKeyAndValueByPointers(
+//			utils.ConcatArrays4ByPointers(
+//				smtBatchRootNode.nodeLeftHashOrRemainingKey.AsUint64Pointer(),
+//				smtBatchRootNode.nodeRightHashOrValueHash.AsUint64Pointer(),
+//			),
+//			&utils.LeafCapacity,
+//		)
+//		smtBatchRootNode.hash = hashObj
+//
+//		// 避免频繁内存分配，当 noSaveOnInsert 为 true 时不存储
+//		if !sdh.s.noSaveOnInsert {
+//			// 将两个数据项写入缓冲区一次性处理，减少内存分配
+//			buffer := newSmtDfsHelperDataStruct(hashObj, hashValue)
+//			// 通过直接修改 path 来减少内存分配
+//			leafKey := utils.JoinKey(path[:level], *smtBatchRootNode.nodeLeftHashOrRemainingKey)
+//			sdh.dataChan <- buffer
+//			sdh.dataChan <- newSmtDfsHelperDataStruct(hashObj, leafKey)
+//		}
+//		return
+//	}
+//
+//	var totalHash utils.NodeValue8
+//	noSave := sdh.s.noSaveOnInsert // 缓存标志，避免每次循环都访问字段
+//
+//	// 直接遍历左右子节点，避免创建额外的数组
+//	for i, child := range []*smtBatchNode{smtBatchRootNode.leftNode, smtBatchRootNode.rightNode} {
+//		path[level] = i
+//		if child != nil {
+//			// 递归调用并合并哈希值
+//			calculateAndSaveHashesDfs(sdh, child, path, level+1)
+//			totalHash.SetHalfValue(*child.hash, i)
+//		} else {
+//			// 如果子节点为空，使用默认哈希值
+//			defaultHash := smtBatchRootNode.nodeLeftHashOrRemainingKey
+//			if i == 1 {
+//				defaultHash = smtBatchRootNode.nodeRightHashOrValueHash
+//			}
+//			totalHash.SetHalfValue(*defaultHash, i)
+//		}
+//	}
+//
+//	// 计算并存储总哈希值
+//	hashObj, hashValue := utils.HashKeyAndValueByPointers(totalHash.ToUintArrayByPointer(), &utils.BranchCapacity)
+//	smtBatchRootNode.hash = hashObj
+//
+//	// 避免重复判断，当 noSaveOnInsert 为 true 时不进行存储
+//	if !noSave {
+//		sdh.dataChan <- newSmtDfsHelperDataStruct(hashObj, hashValue)
+//	}
+//}
+
+/*** GOOD *****/
 func calculateAndSaveHashesDfs(
 	sdh *smtDfsHelper,
-	smtBatchNode *smtBatchNode,
+	smtBatchRootNode *smtBatchNode,
 	path []int,
 	level int,
 ) {
-	if smtBatchNode.isLeaf() {
-		hashObj, hashValue := utils.HashKeyAndValueByPointers(utils.ConcatArrays4ByPointers(smtBatchNode.nodeLeftHashOrRemainingKey.AsUint64Pointer(), smtBatchNode.nodeRightHashOrValueHash.AsUint64Pointer()), &utils.LeafCapacity)
-		smtBatchNode.hash = hashObj
-		if !sdh.s.noSaveOnInsert {
-			sdh.dataChan <- newSmtDfsHelperDataStruct(hashObj, hashValue)
+	noSave := sdh.s.noSaveOnInsert
+	dataChan := sdh.dataChan
 
-			nodeKey := utils.JoinKey(path[:level], *smtBatchNode.nodeLeftHashOrRemainingKey)
-			sdh.dataChan <- newSmtDfsHelperDataStruct(hashObj, nodeKey)
+	// 使用 sync.Pool 复用 path 切片
+	var pathPool = sync.Pool{
+		New: func() interface{} {
+			return make([]int, cap(path)) // 使用 cap 避免长度不足
+		},
+	}
+
+	// 控制最大并发 goroutine 数量，动态适应 CPU
+	maxConcurrency := runtime.GOMAXPROCS(0) * 2 // 动态调整并发数
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, maxConcurrency)
+
+	// 内联叶子节点处理，减少嵌套
+	if smtBatchRootNode.isLeaf() {
+		hashObj, hashValue := utils.HashKeyAndValueByPointers(
+			utils.ConcatArrays4ByPointers(
+				smtBatchRootNode.nodeLeftHashOrRemainingKey.AsUint64Pointer(),
+				smtBatchRootNode.nodeRightHashOrValueHash.AsUint64Pointer(),
+			),
+			&utils.LeafCapacity,
+		)
+		smtBatchRootNode.hash = hashObj
+
+		if !noSave {
+			buffer1 := newSmtDfsHelperDataStruct(hashObj, hashValue)
+			buffer2 := newSmtDfsHelperDataStruct(hashObj, utils.JoinKey(path[:level], *smtBatchRootNode.nodeLeftHashOrRemainingKey))
+			// 单次检查通道状态，减少开销
+			if len(dataChan) < cap(dataChan) {
+				dataChan <- buffer1
+				dataChan <- buffer2
+			}
 		}
 		return
 	}
 
 	var totalHash utils.NodeValue8
 
-	if smtBatchNode.leftNode != nil {
-		path[level] = 0
-		calculateAndSaveHashesDfs(sdh, smtBatchNode.leftNode, path, level+1)
-		totalHash.SetHalfValue(*smtBatchNode.leftNode.hash, 0) // no point to check for error because we used hardcoded 0 which ensures that no error will be returned
-	} else {
-		totalHash.SetHalfValue(*smtBatchNode.nodeLeftHashOrRemainingKey, 0) // no point to check for error because we used hardcoded 0 which ensures that no error will be returned
+	// 内联 processChild 逻辑，减少闭包开销
+	for i, child := range [2]*smtBatchNode{smtBatchRootNode.leftNode, smtBatchRootNode.rightNode} { // 使用数组替代切片
+		if child != nil {
+			if level < 3 { // 浅层串行处理
+				path[level] = i
+				calculateAndSaveHashesDfs(sdh, child, path, level+1)
+				totalHash.SetHalfValue(*child.hash, i)
+			} else { // 深层并行处理
+				wg.Add(1)
+				sem <- struct{}{}
+				childPath := pathPool.Get().([]int)[:len(path)] // 调整长度
+				copy(childPath, path)
+				childPath[level] = i
+				go func(c *smtBatchNode, p []int) {
+					defer func() { <-sem; pathPool.Put(p); wg.Done() }()
+					calculateAndSaveHashesDfs(sdh, c, p, level+1)
+				}(child, childPath)
+			}
+		} else {
+			defaultHash := smtBatchRootNode.nodeLeftHashOrRemainingKey
+			if i == 1 {
+				defaultHash = smtBatchRootNode.nodeRightHashOrValueHash
+			}
+			totalHash.SetHalfValue(*defaultHash, i)
+		}
 	}
 
-	if smtBatchNode.rightNode != nil {
-		path[level] = 1
-		calculateAndSaveHashesDfs(sdh, smtBatchNode.rightNode, path, level+1)
-		totalHash.SetHalfValue(*smtBatchNode.rightNode.hash, 1) // no point to check for error because we used hardcoded 1 which ensures that no error will be returned
-	} else {
-		totalHash.SetHalfValue(*smtBatchNode.nodeRightHashOrValueHash, 1) // no point to check for error because we used hardcoded 1 which ensures that no error will be returned
+	// 等待所有 goroutine 完成
+	wg.Wait()
+
+	// 更新当前节点哈希，内联循环
+	if smtBatchRootNode.leftNode != nil {
+		totalHash.SetHalfValue(*smtBatchRootNode.leftNode.hash, 0)
+	}
+	if smtBatchRootNode.rightNode != nil {
+		totalHash.SetHalfValue(*smtBatchRootNode.rightNode.hash, 1)
 	}
 
 	hashObj, hashValue := utils.HashKeyAndValueByPointers(totalHash.ToUintArrayByPointer(), &utils.BranchCapacity)
-	if !sdh.s.noSaveOnInsert {
-		sdh.dataChan <- newSmtDfsHelperDataStruct(hashObj, hashValue)
-	}
+	smtBatchRootNode.hash = hashObj
 
-	smtBatchNode.hash = hashObj
+	if !noSave && len(dataChan) < cap(dataChan) {
+		dataChan <- newSmtDfsHelperDataStruct(hashObj, hashValue)
+	}
 }
+
+//func calculateAndSaveHashesDfs(
+//	sdh *smtDfsHelper,
+//	smtBatchRootNode *smtBatchNode,
+//	path []int,
+//	level int,
+//) {
+//	noSave := sdh.s.noSaveOnInsert
+//	dataChan := sdh.dataChan
+//
+//	// 使用 sync.Pool 复用 path 切片
+//	var pathPool = sync.Pool{
+//		New: func() interface{} {
+//			return make([]int, cap(path)) // 使用 cap 避免长度不足
+//		},
+//	}
+//
+//	// 控制最大并发 goroutine 数量，动态适应 CPU
+//	maxConcurrency := runtime.GOMAXPROCS(0) * 2 // 动态调整并发数
+//	sem := make(chan struct{}, maxConcurrency)
+//
+//	// 内联叶子节点处理，减少嵌套
+//	if smtBatchRootNode.isLeaf() {
+//		hashObj, hashValue := utils.HashKeyAndValueByPointers(
+//			utils.ConcatArrays4ByPointers(
+//				smtBatchRootNode.nodeLeftHashOrRemainingKey.AsUint64Pointer(),
+//				smtBatchRootNode.nodeRightHashOrValueHash.AsUint64Pointer(),
+//			),
+//			&utils.LeafCapacity,
+//		)
+//		smtBatchRootNode.hash = hashObj
+//
+//		if !noSave {
+//			buffer1 := newSmtDfsHelperDataStruct(hashObj, hashValue)
+//			buffer2 := newSmtDfsHelperDataStruct(hashObj, utils.JoinKey(path[:level], *smtBatchRootNode.nodeLeftHashOrRemainingKey))
+//			// 单次检查通道状态，减少开销
+//			if len(dataChan) < cap(dataChan) {
+//				dataChan <- buffer1
+//				dataChan <- buffer2
+//			}
+//		}
+//		return
+//	}
+//
+//	var totalHash utils.NodeValue8
+//
+//	// 内联 processChild 逻辑，减少闭包开销
+//	for i, child := range [2]*smtBatchNode{smtBatchRootNode.leftNode, smtBatchRootNode.rightNode} { // 使用数组替代切片
+//		if child != nil {
+//			if level < 3 { // 浅层串行处理
+//				path[level] = i
+//				calculateAndSaveHashesDfs(sdh, child, path, level+1)
+//				totalHash.SetHalfValue(*child.hash, i)
+//			} else { // 深层并行处理
+//				sem <- struct{}{}
+//				childPath := pathPool.Get().([]int)[:len(path)] // 调整长度
+//				copy(childPath, path)
+//				childPath[level] = i
+//				go func(c *smtBatchNode, p []int) {
+//					defer func() { <-sem; pathPool.Put(p) }()
+//					calculateAndSaveHashesDfs(sdh, c, p, level+1)
+//				}(child, childPath)
+//			}
+//		} else {
+//			defaultHash := smtBatchRootNode.nodeLeftHashOrRemainingKey
+//			if i == 1 {
+//				defaultHash = smtBatchRootNode.nodeRightHashOrValueHash
+//			}
+//			totalHash.SetHalfValue(*defaultHash, i)
+//		}
+//	}
+//
+//	// 等待所有 goroutine 完成
+//	for i := 0; i < maxConcurrency; i++ {
+//		sem <- struct{}{}
+//	}
+//	close(sem)
+//
+//	// 更新当前节点哈希，内联循环
+//	if smtBatchRootNode.leftNode != nil {
+//		totalHash.SetHalfValue(*smtBatchRootNode.leftNode.hash, 0)
+//	}
+//	if smtBatchRootNode.rightNode != nil {
+//		totalHash.SetHalfValue(*smtBatchRootNode.rightNode.hash, 1)
+//	}
+//
+//	hashObj, hashValue := utils.HashKeyAndValueByPointers(totalHash.ToUintArrayByPointer(), &utils.BranchCapacity)
+//	smtBatchRootNode.hash = hashObj
+//
+//	if !noSave && len(dataChan) < cap(dataChan) {
+//		dataChan <- newSmtDfsHelperDataStruct(hashObj, hashValue)
+//	}
+//}
+
+//func calculateAndSaveHashesDfs(
+//	sdh *smtDfsHelper,
+//	smtBatchRootNode *smtBatchNode,
+//	path []int,
+//	level int,
+//) {
+//	var wg sync.WaitGroup
+//	noSave := sdh.s.noSaveOnInsert
+//	dataChan := sdh.dataChan
+//
+//	// 使用 sync.Pool 复用 path 切片
+//	var pathPool = sync.Pool{
+//		New: func() interface{} {
+//			return make([]int, cap(path)) // 使用 cap 避免长度不足
+//		},
+//	}
+//
+//	// 控制最大并发 goroutine 数量，动态适应 CPU
+//	maxConcurrency := runtime.NumCPU() * 2 // 可调整，或用 runtime.NumCPU()
+//	sem := make(chan struct{}, maxConcurrency)
+//
+//	// 内联叶子节点处理，减少嵌套
+//	if smtBatchRootNode.isLeaf() {
+//		hashObj, hashValue := utils.HashKeyAndValueByPointers(
+//			utils.ConcatArrays4ByPointers(
+//				smtBatchRootNode.nodeLeftHashOrRemainingKey.AsUint64Pointer(),
+//				smtBatchRootNode.nodeRightHashOrValueHash.AsUint64Pointer(),
+//			),
+//			&utils.LeafCapacity,
+//		)
+//		smtBatchRootNode.hash = hashObj
+//
+//		if !noSave {
+//			buffer1 := newSmtDfsHelperDataStruct(hashObj, hashValue)
+//			buffer2 := newSmtDfsHelperDataStruct(hashObj, utils.JoinKey(path[:level], *smtBatchRootNode.nodeLeftHashOrRemainingKey))
+//			// 单次检查通道状态，减少开销
+//			select {
+//			case dataChan <- buffer1:
+//				dataChan <- buffer2 // 如果第一个成功，第二个直接发送
+//			default:
+//				// 通道阻塞或关闭，退出
+//			}
+//		}
+//		return
+//	}
+//
+//	var totalHash utils.NodeValue8
+//
+//	// 内联 processChild 逻辑，减少闭包开销
+//	for i, child := range [2]*smtBatchNode{smtBatchRootNode.leftNode, smtBatchRootNode.rightNode} { // 使用数组替代切片
+//		if child != nil {
+//			if level < 3 { // 浅层串行处理
+//				path[level] = i
+//				calculateAndSaveHashesDfs(sdh, child, path, level+1)
+//				totalHash.SetHalfValue(*child.hash, i)
+//			} else { // 深层并行处理
+//				wg.Add(1)
+//				sem <- struct{}{}
+//				childPath := pathPool.Get().([]int)[:len(path)] // 调整长度
+//				copy(childPath, path)
+//				childPath[level] = i
+//				go func(c *smtBatchNode, p []int) {
+//					defer wg.Done()
+//					defer func() { <-sem }()
+//					defer pathPool.Put(p)
+//					calculateAndSaveHashesDfs(sdh, c, p, level+1)
+//				}(child, childPath)
+//			}
+//		} else {
+//			defaultHash := smtBatchRootNode.nodeLeftHashOrRemainingKey
+//			if i == 1 {
+//				defaultHash = smtBatchRootNode.nodeRightHashOrValueHash
+//			}
+//			totalHash.SetHalfValue(*defaultHash, i)
+//		}
+//	}
+//
+//	wg.Wait()
+//
+//	// 更新当前节点哈希，内联循环
+//	if smtBatchRootNode.leftNode != nil {
+//		totalHash.SetHalfValue(*smtBatchRootNode.leftNode.hash, 0)
+//	}
+//	if smtBatchRootNode.rightNode != nil {
+//		totalHash.SetHalfValue(*smtBatchRootNode.rightNode.hash, 1)
+//	}
+//
+//	hashObj, hashValue := utils.HashKeyAndValueByPointers(totalHash.ToUintArrayByPointer(), &utils.BranchCapacity)
+//	smtBatchRootNode.hash = hashObj
+//
+//	if !noSave {
+//		select {
+//		case dataChan <- newSmtDfsHelperDataStruct(hashObj, hashValue):
+//		default:
+//			// 通道阻塞或关闭，退出
+//		}
+//	}
+//}
+
+//func calculateAndSaveHashesDfs(
+//	sdh *smtDfsHelper,
+//	smtBatchRootNode *smtBatchNode,
+//	path []int,
+//	level int,
+//) {
+//	var wg sync.WaitGroup
+//	noSave := sdh.s.noSaveOnInsert
+//	dataChan := sdh.dataChan
+//
+//	// 使用 sync.Pool 复用 path 切片，减少内存分配
+//	var pathPool = sync.Pool{
+//		New: func() interface{} {
+//			return make([]int, len(path))
+//		},
+//	}
+//
+//	// 控制最大并发 goroutine 数量
+//	const maxConcurrency = 8 // 可根据 CPU 核心数调整
+//	sem := make(chan struct{}, maxConcurrency)
+//
+//	// 内联叶子节点处理
+//	if smtBatchRootNode.isLeaf() {
+//		hashObj, hashValue := utils.HashKeyAndValueByPointers(
+//			utils.ConcatArrays4ByPointers(
+//				smtBatchRootNode.nodeLeftHashOrRemainingKey.AsUint64Pointer(),
+//				smtBatchRootNode.nodeRightHashOrValueHash.AsUint64Pointer(),
+//			),
+//			&utils.LeafCapacity,
+//		)
+//		smtBatchRootNode.hash = hashObj
+//
+//		if !noSave {
+//			buffer := newSmtDfsHelperDataStruct(hashObj, hashValue)
+//			leafKey := utils.JoinKey(path[:level], *smtBatchRootNode.nodeLeftHashOrRemainingKey)
+//			select {
+//			case dataChan <- buffer:
+//				select {
+//				case dataChan <- newSmtDfsHelperDataStruct(hashObj, leafKey):
+//				default:
+//					// 如果第二个发送失败，仍然退出
+//				}
+//			default:
+//				// 如果第一个发送失败，直接退出
+//			}
+//		}
+//		return
+//	}
+//
+//	var totalHash utils.NodeValue8
+//
+//	// 处理子节点的闭包函数
+//	processChild := func(child *smtBatchNode, index int, childPath []int) {
+//		defer wg.Done()
+//		defer func() { <-sem }()      // 释放信号量
+//		defer pathPool.Put(childPath) // 归还 path 切片
+//
+//		childPath[level] = index
+//		calculateAndSaveHashesDfs(sdh, child, childPath, level+1)
+//	}
+//
+//	// 并行处理子节点
+//	for i, child := range []*smtBatchNode{smtBatchRootNode.leftNode, smtBatchRootNode.rightNode} {
+//		if child != nil {
+//			// 优先尝试串行处理小型子树
+//			if level < 3 { // 深度阈值，可调整
+//				path[level] = i
+//				calculateAndSaveHashesDfs(sdh, child, path, level+1)
+//				totalHash.SetHalfValue(*child.hash, i)
+//			} else {
+//				wg.Add(1)
+//				sem <- struct{}{} // 获取信号量
+//				childPath := pathPool.Get().([]int)
+//				copy(childPath, path)
+//				go processChild(child, i, childPath)
+//			}
+//		} else {
+//			defaultHash := smtBatchRootNode.nodeLeftHashOrRemainingKey
+//			if i == 1 {
+//				defaultHash = smtBatchRootNode.nodeRightHashOrValueHash
+//			}
+//			totalHash.SetHalfValue(*defaultHash, i)
+//		}
+//	}
+//
+//	wg.Wait()
+//
+//	// 更新当前节点哈希
+//	for i, child := range []*smtBatchNode{smtBatchRootNode.leftNode, smtBatchRootNode.rightNode} {
+//		if child != nil {
+//			totalHash.SetHalfValue(*child.hash, i)
+//		}
+//	}
+//
+//	hashObj, hashValue := utils.HashKeyAndValueByPointers(totalHash.ToUintArrayByPointer(), &utils.BranchCapacity)
+//	smtBatchRootNode.hash = hashObj
+//
+//	if !noSave {
+//		select {
+//		case dataChan <- newSmtDfsHelperDataStruct(hashObj, hashValue):
+//		default:
+//			// 通道阻塞或关闭，退出
+//		}
+//	}
+//}
+
+//func calculateAndSaveHashesDfs(
+//	sdh *smtDfsHelper,
+//	smtBatchRootNode *smtBatchNode,
+//	path []int,
+//	level int,
+//) {
+//	var wg sync.WaitGroup // 用于同步子节点处理
+//	noSave := sdh.s.noSaveOnInsert
+//	dataChan := sdh.dataChan // 缓存通道引用
+//
+//	// 内联叶子节点处理
+//	if smtBatchRootNode.isLeaf() {
+//		hashObj, hashValue := utils.HashKeyAndValueByPointers(
+//			utils.ConcatArrays4ByPointers(
+//				smtBatchRootNode.nodeLeftHashOrRemainingKey.AsUint64Pointer(),
+//				smtBatchRootNode.nodeRightHashOrValueHash.AsUint64Pointer(),
+//			),
+//			&utils.LeafCapacity,
+//		)
+//		smtBatchRootNode.hash = hashObj
+//
+//		if !noSave {
+//			buffer := newSmtDfsHelperDataStruct(hashObj, hashValue)
+//			select {
+//			case dataChan <- buffer:
+//			default:
+//				return // 通道阻塞或关闭，提前退出
+//			}
+//			select {
+//			case dataChan <- newSmtDfsHelperDataStruct(hashObj, utils.JoinKey(path[:level], *smtBatchRootNode.nodeLeftHashOrRemainingKey)):
+//			default:
+//				return
+//			}
+//		}
+//		return
+//	}
+//
+//	var totalHash utils.NodeValue8
+//
+//	// 并行处理子节点
+//	for i, child := range []*smtBatchNode{smtBatchRootNode.leftNode, smtBatchRootNode.rightNode} {
+//		path[level] = i
+//		if child != nil {
+//			wg.Add(1)
+//			// 为每个子节点创建独立的路径副本，避免并发修改
+//			childPath := make([]int, len(path))
+//			copy(childPath, path)
+//			go func(c *smtBatchNode, l int, p []int) {
+//				defer wg.Done()
+//				calculateAndSaveHashesDfs(sdh, c, p, l)
+//			}(child, level+1, childPath)
+//		} else {
+//			defaultHash := smtBatchRootNode.nodeLeftHashOrRemainingKey
+//			if i == 1 {
+//				defaultHash = smtBatchRootNode.nodeRightHashOrValueHash
+//			}
+//			totalHash.SetHalfValue(*defaultHash, i)
+//		}
+//	}
+//
+//	// 等待所有子节点处理完成
+//	wg.Wait()
+//
+//	// 更新当前节点的哈希值
+//	for i, child := range []*smtBatchNode{smtBatchRootNode.leftNode, smtBatchRootNode.rightNode} {
+//		if child != nil {
+//			totalHash.SetHalfValue(*child.hash, i)
+//		}
+//	}
+//
+//	hashObj, hashValue := utils.HashKeyAndValueByPointers(totalHash.ToUintArrayByPointer(), &utils.BranchCapacity)
+//	smtBatchRootNode.hash = hashObj
+//
+//	if !noSave {
+//		select {
+//		case dataChan <- newSmtDfsHelperDataStruct(hashObj, hashValue):
+//		default:
+//			return // 通道阻塞或关闭，提前退出
+//		}
+//	}
+//}
+
+//func calculateAndSaveHashesDfs(
+//	sdh *smtDfsHelper,
+//	smtBatchRootNode *smtBatchNode,
+//	path []int,
+//	level int,
+//) {
+//	// 内联叶子节点处理，避免函数调用开销
+//	if smtBatchRootNode.isLeaf() {
+//		hashObj, hashValue := utils.HashKeyAndValueByPointers(
+//			utils.ConcatArrays4ByPointers(
+//				smtBatchRootNode.nodeLeftHashOrRemainingKey.AsUint64Pointer(),
+//				smtBatchRootNode.nodeRightHashOrValueHash.AsUint64Pointer(),
+//			),
+//			&utils.LeafCapacity,
+//		)
+//		smtBatchRootNode.hash = hashObj
+//
+//		// 如果 noSaveOnInsert 标志设置为 true，避免内存分配
+//		if !sdh.s.noSaveOnInsert {
+//			// 使用单一缓冲区减少内存分配
+//			buffer := newSmtDfsHelperDataStruct(hashObj, hashValue)
+//			sdh.dataChan <- buffer
+//			sdh.dataChan <- newSmtDfsHelperDataStruct(hashObj, utils.JoinKey(path[:level], *smtBatchRootNode.nodeLeftHashOrRemainingKey))
+//		}
+//		return
+//	}
+//
+//	var totalHash utils.NodeValue8
+//	noSave := sdh.s.noSaveOnInsert // 缓存 noSave 标志，避免多次访问字段
+//
+//	// 直接遍历子节点，避免创建临时数组
+//	for i, child := range []*smtBatchNode{smtBatchRootNode.leftNode, smtBatchRootNode.rightNode} {
+//		path[level] = i
+//		if child != nil {
+//			// 直接传递 path 和 level 参数，避免重新计算
+//			calculateAndSaveHashesDfs(sdh, child, path, level+1)
+//			totalHash.SetHalfValue(*child.hash, i)
+//		} else {
+//			// 仅在必要时使用 nodeLeftHashOrRemainingKey
+//			defaultHash := smtBatchRootNode.nodeLeftHashOrRemainingKey
+//			if i == 1 {
+//				defaultHash = smtBatchRootNode.nodeRightHashOrValueHash
+//			}
+//			totalHash.SetHalfValue(*defaultHash, i)
+//		}
+//	}
+//
+//	// 计算并存储哈希
+//	hashObj, hashValue := utils.HashKeyAndValueByPointers(totalHash.ToUintArrayByPointer(), &utils.BranchCapacity)
+//	smtBatchRootNode.hash = hashObj
+//
+//	// 如果 noSaveOnInsert 标志设置为 true，则避免存储
+//	if !noSave {
+//		sdh.dataChan <- newSmtDfsHelperDataStruct(hashObj, hashValue)
+//	}
+//}
+
+//func calculateAndSaveHashesDfs(
+//	sdh *smtDfsHelper,
+//	smtBatchRootNode *smtBatchNode,
+//	path []int,
+//	level int,
+//) {
+//	// 内联叶子节点处理，减少函数调用
+//	if smtBatchRootNode.isLeaf() {
+//		hashObj, hashValue := utils.HashKeyAndValueByPointers(
+//			utils.ConcatArrays4ByPointers(
+//				smtBatchRootNode.nodeLeftHashOrRemainingKey.AsUint64Pointer(),
+//				smtBatchRootNode.nodeRightHashOrValueHash.AsUint64Pointer(),
+//			),
+//			&utils.LeafCapacity,
+//		)
+//		smtBatchRootNode.hash = hashObj
+//
+//		if !sdh.s.noSaveOnInsert {
+//			// 使用缓冲区减少内存分配
+//			buffer := [2]*smtDfsHelperDataStruct{
+//				newSmtDfsHelperDataStruct(hashObj, hashValue),
+//				newSmtDfsHelperDataStruct(hashObj, utils.JoinKey(path[:level], *smtBatchRootNode.nodeLeftHashOrRemainingKey)),
+//			}
+//			sdh.dataChan <- buffer[0]
+//			sdh.dataChan <- buffer[1]
+//		}
+//		return
+//	}
+//
+//	var totalHash utils.NodeValue8
+//	noSave := sdh.s.noSaveOnInsert // 缓存字段访问结果
+//
+//	// 处理左右子节点，合并相似逻辑
+//	for i, child := range []*smtBatchNode{smtBatchRootNode.leftNode, smtBatchRootNode.rightNode} {
+//		path[level] = i
+//		if child != nil {
+//			calculateAndSaveHashesDfs(sdh, child, path, level+1)
+//			totalHash.SetHalfValue(*child.hash, i)
+//		} else {
+//			defaultHash := smtBatchRootNode.nodeLeftHashOrRemainingKey
+//			if i == 1 {
+//				defaultHash = smtBatchRootNode.nodeRightHashOrValueHash
+//			}
+//			totalHash.SetHalfValue(*defaultHash, i)
+//		}
+//	}
+//
+//	// 计算并存储哈希
+//	hashObj, hashValue := utils.HashKeyAndValueByPointers(totalHash.ToUintArrayByPointer(), &utils.BranchCapacity)
+//	smtBatchRootNode.hash = hashObj
+//	if !noSave {
+//		sdh.dataChan <- newSmtDfsHelperDataStruct(hashObj, hashValue)
+//	}
+//}
+
+//func calculateAndSaveHashesDfs(
+//	sdh *smtDfsHelper,
+//	smtBatchNode *smtBatchNode,
+//	path []int,
+//	level int,
+//) {
+//	if smtBatchNode.isLeaf() {
+//		hashObj, hashValue := utils.HashKeyAndValueByPointers(
+//			utils.ConcatArrays4ByPointers(
+//				smtBatchNode.nodeLeftHashOrRemainingKey.AsUint64Pointer(),
+//				smtBatchNode.nodeRightHashOrValueHash.AsUint64Pointer(),
+//			),
+//			&utils.LeafCapacity,
+//		)
+//		smtBatchNode.hash = hashObj
+//		if !sdh.s.noSaveOnInsert {
+//			buffer := make([]*smtDfsHelperDataStruct, 0, 512) // 存指针
+//			buffer = append(buffer, newSmtDfsHelperDataStruct(hashObj, hashValue))
+//
+//			nodeKey := utils.JoinKey(path[:level], *smtBatchNode.nodeLeftHashOrRemainingKey)
+//			buffer = append(buffer, newSmtDfsHelperDataStruct(hashObj, nodeKey))
+//
+//			flushBuffer(sdh, buffer) // 统一发送
+//		}
+//		return
+//	}
+//
+//	var totalHash utils.NodeValue8
+//	buffer := make([]*smtDfsHelperDataStruct, 0, 512) // 预分配 buffer
+//
+//	if smtBatchNode.leftNode != nil {
+//		path[level] = 0
+//		calculateAndSaveHashesDfs(sdh, smtBatchNode.leftNode, path, level+1)
+//		totalHash.SetHalfValue(*smtBatchNode.leftNode.hash, 0)
+//	} else {
+//		totalHash.SetHalfValue(*smtBatchNode.nodeLeftHashOrRemainingKey, 0)
+//	}
+//
+//	if smtBatchNode.rightNode != nil {
+//		path[level] = 1
+//		calculateAndSaveHashesDfs(sdh, smtBatchNode.rightNode, path, level+1)
+//		totalHash.SetHalfValue(*smtBatchNode.rightNode.hash, 1)
+//	} else {
+//		totalHash.SetHalfValue(*smtBatchNode.nodeRightHashOrValueHash, 1)
+//	}
+//
+//	hashObj, hashValue := utils.HashKeyAndValueByPointers(totalHash.ToUintArrayByPointer(), &utils.BranchCapacity)
+//	if !sdh.s.noSaveOnInsert {
+//		buffer = append(buffer, newSmtDfsHelperDataStruct(hashObj, hashValue))
+//		flushBuffer(sdh, buffer) // 统一发送
+//	}
+//
+//	smtBatchNode.hash = hashObj
+//}
+//
+//// 统一发送 buffer
+//func flushBuffer(sdh *smtDfsHelper, buffer []*smtDfsHelperDataStruct) {
+//	for _, data := range buffer {
+//		sdh.dataChan <- data // 解引用后发送
+//	}
+//}
+
+//// no point to parallelize this function because db consumer is slower than this producer
+//func calculateAndSaveHashesDfs(
+//	sdh *smtDfsHelper,
+//	smtBatchNode *smtBatchNode,
+//	path []int,
+//	level int,
+//) {
+//	if smtBatchNode.isLeaf() {
+//		hashObj, hashValue := utils.HashKeyAndValueByPointers(utils.ConcatArrays4ByPointers(smtBatchNode.nodeLeftHashOrRemainingKey.AsUint64Pointer(), smtBatchNode.nodeRightHashOrValueHash.AsUint64Pointer()), &utils.LeafCapacity)
+//		smtBatchNode.hash = hashObj
+//		if !sdh.s.noSaveOnInsert {
+//			sdh.dataChan <- newSmtDfsHelperDataStruct(hashObj, hashValue)
+//
+//			nodeKey := utils.JoinKey(path[:level], *smtBatchNode.nodeLeftHashOrRemainingKey)
+//			sdh.dataChan <- newSmtDfsHelperDataStruct(hashObj, nodeKey)
+//		}
+//		return
+//	}
+//
+//	var totalHash utils.NodeValue8
+//
+//	if smtBatchNode.leftNode != nil {
+//		path[level] = 0
+//		calculateAndSaveHashesDfs(sdh, smtBatchNode.leftNode, path, level+1)
+//		totalHash.SetHalfValue(*smtBatchNode.leftNode.hash, 0) // no point to check for error because we used hardcoded 0 which ensures that no error will be returned
+//	} else {
+//		totalHash.SetHalfValue(*smtBatchNode.nodeLeftHashOrRemainingKey, 0) // no point to check for error because we used hardcoded 0 which ensures that no error will be returned
+//	}
+//
+//	if smtBatchNode.rightNode != nil {
+//		path[level] = 1
+//		calculateAndSaveHashesDfs(sdh, smtBatchNode.rightNode, path, level+1)
+//		totalHash.SetHalfValue(*smtBatchNode.rightNode.hash, 1) // no point to check for error because we used hardcoded 1 which ensures that no error will be returned
+//	} else {
+//		totalHash.SetHalfValue(*smtBatchNode.nodeRightHashOrValueHash, 1) // no point to check for error because we used hardcoded 1 which ensures that no error will be returned
+//	}
+//
+//	hashObj, hashValue := utils.HashKeyAndValueByPointers(totalHash.ToUintArrayByPointer(), &utils.BranchCapacity)
+//	if !sdh.s.noSaveOnInsert {
+//		sdh.dataChan <- newSmtDfsHelperDataStruct(hashObj, hashValue)
+//	}
+//
+//	smtBatchNode.hash = hashObj
+//}
 
 type smtBatchNode struct {
 	nodeLeftHashOrRemainingKey *utils.NodeKey
