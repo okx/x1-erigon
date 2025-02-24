@@ -236,6 +236,13 @@ func ConvertUint64ToHex(n uint64) string {
 	return fmt.Sprintf("%x", n)
 }
 
+func ConvertUint64Array8ToHex64Bit(a []uint64) string {
+	if len(a) != 8 {
+		panic("invalid array length")
+	}
+	return fmt.Sprintf("0x%x%016x%016x%016x%016x%016x%016x%016x", a[7], a[6], a[5], a[4], a[3], a[2], a[1], a[0])
+}
+
 // 7 times more efficient than sprintf
 func ConvertBigIntToHex(n *big.Int) string {
 	return "0x" + n.Text(16)

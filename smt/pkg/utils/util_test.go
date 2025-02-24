@@ -142,6 +142,34 @@ func TestConvertHexToBigInt(t *testing.T) {
 	}
 }
 
+func TestConvertUint64Array8ToHex(t *testing.T) {
+	arr := []uint64{1, 2, 3, 4, 5, 6, 7, 8}
+	s1 := ConvertUint64Array8ToHex64Bit(arr)
+	s2 := ConvertBigIntToHex(ArrayToScalar64Bit(arr))
+	if s1 != s2 {
+		t.Errorf("ConvertUint64Array8ToHex(%v) = %v; want %v", arr, s1, s2)
+	}
+}
+
+func BenchmarkConvertUint64Array8ToHex(b *testing.B) {
+	arr := []uint64{1, 2, 3, 4, 5, 6, 7, 8}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		ConvertUint64Array8ToHex64Bit(arr)
+	}
+}
+
+func BenchmarkConvertBigIntToHexB2(b *testing.B) {
+	arr := []uint64{1, 2, 3, 4, 5, 6, 7, 8}
+	sc := ArrayToScalar64Bit(arr)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		ConvertBigIntToHex(sc)
+	}
+}
+
 func TestScalarToArray8(t *testing.T) {
 	scalar := big.NewInt(0x1234567890ABCDEF)
 
