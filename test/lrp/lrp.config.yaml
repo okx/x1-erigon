@@ -1,8 +1,8 @@
-user: oker
-gitCommit: 2c0b75194e
+user: kyrin
+gitCommit: e4fddbfa0c
 portDiff: 3
 fromBatchNumber: 134485
 toBatchNumber: 134500
 useExternalDatastream: true
-externalDatastreamPath: $HOME/Downloads/external_ds/data-stream
+externalDatastreamPath: ./external_ds/data-stream
 srcMainnetDataPath: $HOME/Downloads/mainnet/seq

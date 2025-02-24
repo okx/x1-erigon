@@ -67,14 +67,10 @@ lrp-config:
 		sed -i '' "s/--unwind-batch-no=[0-9]*/--unwind-batch-no=$$UNWIND_BATCH_NO/" docker-compose.yml; \
 		sed -i '' "s/--zkevm.sequencer-resequence-halt-on-batch-number=[0-9]*/--zkevm.sequencer-resequence-halt-on-batch-number=$$TO_BATCH_NO/" docker-compose.yml; \
 		sed -i '' "s/--zkevm.sequencer-resequence-external-datastream=\(true\|false\)/--zkevm.sequencer-resequence-external-datastream=$$EXTERNAL_DS/" docker-compose.yml; \
-		sed -i '' "s|- .*:/home/data-stream.bin|- ./external_ds/data-stream.bin:/home/data-stream.bin|" docker-compose.yml; \
-		sed -i '' "s|- .*:/home/data-stream.db/|- ./external_ds/data-stream.db:/home/data-stream.db/|" docker-compose.yml; \
 	else \
 		sed -i "s/--unwind-batch-no=[0-9]*/--unwind-batch-no=$$UNWIND_BATCH_NO/" docker-compose.yml; \
 		sed -i "s/--zkevm.sequencer-resequence-halt-on-batch-number=[0-9]*/--zkevm.sequencer-resequence-halt-on-batch-number=$$TO_BATCH_NO/" docker-compose.yml; \
 		sed -i "s/--zkevm.sequencer-resequence-external-datastream=\(true\|false\)/--zkevm.sequencer-resequence-external-datastream=$$EXTERNAL_DS/" docker-compose.yml; \
-		sed -i "s|- .*:/home/data-stream.bin|- ./external_ds/data-stream.bin:/home/data-stream.bin|" docker-compose.yml; \
-		sed -i "s|- .*:/home/data-stream.db/|- ./external_ds/data-stream.db:/home/data-stream.db/|" docker-compose.yml; \
 	fi; \
 	if [ ! -f lrp.config.yaml ]; then \
 		echo "user: $$USER_NAME" > lrp.config.yaml; \
