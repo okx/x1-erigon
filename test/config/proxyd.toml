@@ -74,11 +74,6 @@ consensus_max_update_threshold = "1s"
 consensus_ha = false
 consensus_ha_heartbeat_interval = "20ms"
 
-[backend_groups.erigon_pay.consensus_ha_redis] # HA redis for target group
-namespace = "pay"
-url = "redis://okx-x1-pro.u7nhys.clustercfg.memorydb.ap-east-1.amazonaws.com:6379"
-choice = "cluster"
-
 # Mapping of methods to backend groups.
 [rpc_method_mappings]
 eth_call = "erigon_wo"
