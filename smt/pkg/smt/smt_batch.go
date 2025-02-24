@@ -518,6 +518,8 @@ func updateNodeHashesForDelete(
 	}
 }
 
+// =========== op1 ================
+
 //func calculateAndSaveHashesDfs(
 //	sdh *smtDfsHelper,
 //	smtBatchRootNode *smtBatchNode,
@@ -604,6 +606,8 @@ func updateNodeHashesForDelete(
 //		}
 //	}
 //}
+
+// =========== op2 ================
 
 //func calculateAndSaveHashesDfs(
 //	sdh *smtDfsHelper,
@@ -694,6 +698,8 @@ func updateNodeHashesForDelete(
 //	}
 //}
 
+// =========== op3 ================
+
 //func calculateAndSaveHashesDfs(
 //	sdh *smtDfsHelper,
 //	smtBatchRootNode *smtBatchNode,
@@ -753,6 +759,8 @@ func updateNodeHashesForDelete(
 //		sdh.dataChan <- newSmtDfsHelperDataStruct(hashObj, hashValue)
 //	}
 //}
+
+// =========== op4 ================
 
 //func calculateAndSaveHashesDfs(
 //	sdh *smtDfsHelper,
@@ -814,6 +822,8 @@ func updateNodeHashesForDelete(
 //	}
 //}
 
+// =========== op5 ================
+
 //func calculateAndSaveHashesDfs(
 //	sdh *smtDfsHelper,
 //	smtBatchRootNode *smtBatchNode,
@@ -873,29 +883,19 @@ func updateNodeHashesForDelete(
 //	}
 //}
 
-/*** GOOD *****/
+// =========== op6 ================
+
 func calculateAndSaveHashesDfs(
 	sdh *smtDfsHelper,
 	smtBatchRootNode *smtBatchNode,
 	path []int,
 	level int,
 ) {
-	noSave := sdh.s.noSaveOnInsert
+	const maxConcurrencyFactor = 2
 	dataChan := sdh.dataChan
+	noSave := sdh.s.noSaveOnInsert
 
-	// 使用 sync.Pool 复用 path 切片
-	var pathPool = sync.Pool{
-		New: func() interface{} {
-			return make([]int, cap(path)) // 使用 cap 避免长度不足
-		},
-	}
-
-	// 控制最大并发 goroutine 数量，动态适应 CPU
-	maxConcurrency := runtime.GOMAXPROCS(0) * 2 // 动态调整并发数
-	var wg sync.WaitGroup
-	sem := make(chan struct{}, maxConcurrency)
-
-	// 内联叶子节点处理，减少嵌套
+	// Handle leaf node inline
 	if smtBatchRootNode.isLeaf() {
 		hashObj, hashValue := utils.HashKeyAndValueByPointers(
 			utils.ConcatArrays4ByPointers(
@@ -906,58 +906,77 @@ func calculateAndSaveHashesDfs(
 		)
 		smtBatchRootNode.hash = hashObj
 
-		if !noSave {
+		if !noSave && len(dataChan) < cap(dataChan) {
 			buffer1 := newSmtDfsHelperDataStruct(hashObj, hashValue)
 			buffer2 := newSmtDfsHelperDataStruct(hashObj, utils.JoinKey(path[:level], *smtBatchRootNode.nodeLeftHashOrRemainingKey))
-			// 单次检查通道状态，减少开销
-			if len(dataChan) < cap(dataChan) {
-				dataChan <- buffer1
+			select {
+			case dataChan <- buffer1:
 				dataChan <- buffer2
+			default:
 			}
 		}
 		return
 	}
 
+	// Initialize path pool and semaphore
+	var pathPool = sync.Pool{
+		New: func() interface{} {
+			return make([]int, 0, cap(path)) // Use original capacity
+		},
+	}
+	maxConcurrency := runtime.NumCPU() * maxConcurrencyFactor
+	sem := make(chan struct{}, maxConcurrency)
+	var wg sync.WaitGroup
 	var totalHash utils.NodeValue8
 
-	// 内联 processChild 逻辑，减少闭包开销
-	for i, child := range [2]*smtBatchNode{smtBatchRootNode.leftNode, smtBatchRootNode.rightNode} { // 使用数组替代切片
-		if child != nil {
-			if level < 3 { // 浅层串行处理
-				path[level] = i
-				calculateAndSaveHashesDfs(sdh, child, path, level+1)
-				totalHash.SetHalfValue(*child.hash, i)
-			} else { // 深层并行处理
-				wg.Add(1)
-				sem <- struct{}{}
-				childPath := pathPool.Get().([]int)[:len(path)] // 调整长度
-				copy(childPath, path)
-				childPath[level] = i
-				go func(c *smtBatchNode, p []int) {
-					defer func() { <-sem; pathPool.Put(p); wg.Done() }()
-					calculateAndSaveHashesDfs(sdh, c, p, level+1)
-				}(child, childPath)
-			}
-		} else {
+	// Process children
+	children := [2]*smtBatchNode{smtBatchRootNode.leftNode, smtBatchRootNode.rightNode}
+	for i, child := range children {
+		if child == nil {
 			defaultHash := smtBatchRootNode.nodeLeftHashOrRemainingKey
 			if i == 1 {
 				defaultHash = smtBatchRootNode.nodeRightHashOrValueHash
 			}
 			totalHash.SetHalfValue(*defaultHash, i)
+			continue
+		}
+
+		// Ensure path has enough length for the new level
+		if level >= len(path) {
+			path = append(path, 0) // Grow path if needed
+		}
+		path[level] = i
+
+		if level < 3 { // Serial processing for shallow levels
+			calculateAndSaveHashesDfs(sdh, child, path, level+1)
+			totalHash.SetHalfValue(*child.hash, i)
+		} else { // Parallel processing for deeper levels
+			wg.Add(1)
+			sem <- struct{}{}
+			childPath := append(pathPool.Get().([]int), path[:level+1]...)
+
+			go func(c *smtBatchNode, p []int) {
+				defer func() {
+					<-sem
+					pathPool.Put(p[:0])
+					wg.Done()
+				}()
+				calculateAndSaveHashesDfs(sdh, c, p, level+1)
+			}(child, childPath)
 		}
 	}
 
-	// 等待所有 goroutine 完成
+	// Wait for all goroutines to complete
 	wg.Wait()
 
-	// 更新当前节点哈希，内联循环
-	if smtBatchRootNode.leftNode != nil {
-		totalHash.SetHalfValue(*smtBatchRootNode.leftNode.hash, 0)
-	}
-	if smtBatchRootNode.rightNode != nil {
-		totalHash.SetHalfValue(*smtBatchRootNode.rightNode.hash, 1)
+	// Update totalHash with child hashes after all are computed
+	for i, child := range children {
+		if child != nil && level >= 3 {
+			totalHash.SetHalfValue(*child.hash, i)
+		}
 	}
 
+	// Compute and set the current node's hash
 	hashObj, hashValue := utils.HashKeyAndValueByPointers(totalHash.ToUintArrayByPointer(), &utils.BranchCapacity)
 	smtBatchRootNode.hash = hashObj
 
@@ -965,6 +984,1070 @@ func calculateAndSaveHashesDfs(
 		dataChan <- newSmtDfsHelperDataStruct(hashObj, hashValue)
 	}
 }
+
+// =========== op7 ================
+
+//type stackFrame struct {
+//	node  *smtBatchNode
+//	level int
+//	state uint8 // 0: 未处理, 1: 左子树处理完, 2: 两边处理完
+//}
+//
+//func calculateAndSaveHashesDfs(
+//	sdh *smtDfsHelper,
+//	smtBatchRootNode *smtBatchNode,
+//	path []int,
+//	level int,
+//) {
+//	stack := make([]stackFrame, 0, 1024)
+//	stack = append(stack, stackFrame{node: smtBatchRootNode, level: level})
+//	var totalHash utils.NodeValue8
+//	var wg sync.WaitGroup
+//	var bufferWg sync.WaitGroup
+//	maxGoroutineLevel := runtime.NumCPU() / 2
+//	if maxGoroutineLevel < 2 {
+//		maxGoroutineLevel = 2
+//	}
+//	const bufferCapacity = 256
+//
+//	dataBuffer := make([]*smtDfsHelperDataStruct, 0, bufferCapacity)
+//
+//	flushBuffer := func(buffer []*smtDfsHelperDataStruct) {
+//		defer bufferWg.Done()
+//		for _, data := range buffer {
+//			select {
+//			case sdh.dataChan <- data:
+//			default:
+//				return
+//			}
+//		}
+//	}
+//
+//	for len(stack) > 0 {
+//		currIdx := len(stack) - 1
+//		frame := &stack[currIdx]
+//		node := frame.node
+//		currentLevel := frame.level
+//
+//		if node.isLeaf() {
+//			leftHash := node.nodeLeftHashOrRemainingKey.AsUint64Pointer()
+//			rightHash := node.nodeRightHashOrValueHash.AsUint64Pointer()
+//			hashObj, hashValue := utils.HashKeyAndValueByPointers(
+//				utils.ConcatArrays4ByPointers(leftHash, rightHash),
+//				&utils.LeafCapacity,
+//			)
+//			node.hash = hashObj
+//			if !sdh.s.noSaveOnInsert {
+//				dataBuffer = append(dataBuffer, newSmtDfsHelperDataStruct(hashObj, hashValue))
+//				nodeKey := utils.JoinKey(path[:currentLevel], *node.nodeLeftHashOrRemainingKey)
+//				dataBuffer = append(dataBuffer, newSmtDfsHelperDataStruct(hashObj, nodeKey))
+//
+//				if len(dataBuffer) >= bufferCapacity {
+//					bufferCopy := make([]*smtDfsHelperDataStruct, len(dataBuffer))
+//					copy(bufferCopy, dataBuffer)
+//					bufferWg.Add(1)
+//					go flushBuffer(bufferCopy)
+//					dataBuffer = dataBuffer[:0]
+//				}
+//			}
+//			stack = stack[:currIdx]
+//			continue
+//		}
+//
+//		switch frame.state {
+//		case 0:
+//			if node.leftNode != nil {
+//				path[currentLevel] = 0
+//				processChild(sdh, node.leftNode, path, currentLevel, &stack, &wg, maxGoroutineLevel)
+//				frame.state = 1
+//				continue
+//			}
+//			fallthrough
+//		case 1:
+//			if node.rightNode != nil {
+//				path[currentLevel] = 1
+//				processChild(sdh, node.rightNode, path, currentLevel, &stack, &wg, maxGoroutineLevel)
+//				frame.state = 2
+//				continue
+//			}
+//			fallthrough
+//		case 2:
+//			if currentLevel < maxGoroutineLevel {
+//				wg.Wait()
+//			}
+//			if node.leftNode != nil {
+//				totalHash.SetHalfValue(*node.leftNode.hash, 0)
+//			} else {
+//				totalHash.SetHalfValue(*node.nodeLeftHashOrRemainingKey, 0)
+//			}
+//			if node.rightNode != nil {
+//				totalHash.SetHalfValue(*node.rightNode.hash, 1)
+//			} else {
+//				totalHash.SetHalfValue(*node.nodeRightHashOrValueHash, 1)
+//			}
+//			hashObj, hashValue := utils.HashKeyAndValueByPointers(totalHash.ToUintArrayByPointer(), &utils.BranchCapacity)
+//			if !sdh.s.noSaveOnInsert {
+//				dataBuffer = append(dataBuffer, newSmtDfsHelperDataStruct(hashObj, hashValue))
+//
+//				if len(dataBuffer) >= bufferCapacity {
+//					bufferCopy := make([]*smtDfsHelperDataStruct, len(dataBuffer))
+//					copy(bufferCopy, dataBuffer)
+//					bufferWg.Add(1)
+//					go flushBuffer(bufferCopy)
+//					dataBuffer = dataBuffer[:0]
+//				}
+//			}
+//			node.hash = hashObj
+//			stack = stack[:currIdx]
+//		}
+//	}
+//
+//	if len(dataBuffer) > 0 && !sdh.s.noSaveOnInsert {
+//		bufferCopy := make([]*smtDfsHelperDataStruct, len(dataBuffer))
+//		copy(bufferCopy, dataBuffer)
+//		bufferWg.Add(1)
+//		go flushBuffer(bufferCopy)
+//	}
+//	bufferWg.Wait()
+//}
+//
+//func processChild(
+//	sdh *smtDfsHelper,
+//	child *smtBatchNode,
+//	path []int,
+//	level int,
+//	stack *[]stackFrame,
+//	wg *sync.WaitGroup,
+//	maxGoroutineLevel int,
+//) {
+//	nextLevel := level + 1
+//
+//	if level < maxGoroutineLevel {
+//		pathCopy := make([]int, len(path))
+//		copy(pathCopy, path)
+//		wg.Add(1)
+//		go func(n *smtBatchNode, p []int, l int) {
+//			defer wg.Done()
+//			calculateAndSaveHashesDfs(sdh, n, p, l)
+//		}(child, pathCopy, nextLevel)
+//	} else {
+//		*stack = append(*stack, stackFrame{node: child, level: nextLevel})
+//	}
+//}
+
+// =========== op8 ================
+
+//type stackFrame struct {
+//	node  *smtBatchNode
+//	level int
+//	state uint8 // 0: 未处理, 1: 左子树处理完, 2: 两边处理完
+//}
+//
+//func calculateAndSaveHashesDfs(
+//	sdh *smtDfsHelper,
+//	smtBatchRootNode *smtBatchNode,
+//	path []int,
+//	level int,
+//) {
+//	stack := make([]stackFrame, 0, 1024)
+//	stack = append(stack, stackFrame{node: smtBatchRootNode, level: level})
+//	var totalHash utils.NodeValue8
+//	var wg sync.WaitGroup
+//	var bufferWg sync.WaitGroup
+//	maxGoroutineLevel := runtime.NumCPU() / 2
+//	if maxGoroutineLevel < 2 {
+//		maxGoroutineLevel = 2
+//	}
+//	const bufferCapacity = 256
+//
+//	dataBuffer := make([]*smtDfsHelperDataStruct, 0, bufferCapacity)
+//
+//	flushBuffer := func(buffer []*smtDfsHelperDataStruct) {
+//		defer bufferWg.Done()
+//		for _, data := range buffer {
+//			select {
+//			case sdh.dataChan <- data:
+//			default:
+//				return
+//			}
+//		}
+//	}
+//
+//	for len(stack) > 0 {
+//		currIdx := len(stack) - 1
+//		frame := &stack[currIdx]
+//		node := frame.node
+//		currentLevel := frame.level
+//
+//		if node.isLeaf() {
+//			leftHash := node.nodeLeftHashOrRemainingKey.AsUint64Pointer()
+//			rightHash := node.nodeRightHashOrValueHash.AsUint64Pointer()
+//			hashObj, hashValue := utils.HashKeyAndValueByPointers(
+//				utils.ConcatArrays4ByPointers(leftHash, rightHash),
+//				&utils.LeafCapacity,
+//			)
+//			node.hash = hashObj
+//			if !sdh.s.noSaveOnInsert {
+//				dataBuffer = append(dataBuffer, newSmtDfsHelperDataStruct(hashObj, hashValue))
+//				nodeKey := utils.JoinKey(path[:currentLevel], *node.nodeLeftHashOrRemainingKey)
+//				dataBuffer = append(dataBuffer, newSmtDfsHelperDataStruct(hashObj, nodeKey))
+//
+//				if len(dataBuffer) >= bufferCapacity {
+//					bufferCopy := make([]*smtDfsHelperDataStruct, len(dataBuffer))
+//					copy(bufferCopy, dataBuffer)
+//					bufferWg.Add(1)
+//					go flushBuffer(bufferCopy)
+//					dataBuffer = dataBuffer[:0]
+//				}
+//			}
+//			stack = stack[:currIdx]
+//			continue
+//		}
+//
+//		switch frame.state {
+//		case 0:
+//			if node.leftNode != nil {
+//				path[currentLevel] = 0
+//				processChild(sdh, node.leftNode, path, currentLevel, &stack, &wg, maxGoroutineLevel)
+//				frame.state = 1
+//				continue
+//			}
+//			fallthrough
+//		case 1:
+//			if node.rightNode != nil {
+//				path[currentLevel] = 1
+//				processChild(sdh, node.rightNode, path, currentLevel, &stack, &wg, maxGoroutineLevel)
+//				frame.state = 2
+//				continue
+//			}
+//			fallthrough
+//		case 2:
+//			if currentLevel < maxGoroutineLevel {
+//				wg.Wait()
+//			}
+//			if node.leftNode != nil {
+//				totalHash.SetHalfValue(*node.leftNode.hash, 0)
+//			} else {
+//				totalHash.SetHalfValue(*node.nodeLeftHashOrRemainingKey, 0)
+//			}
+//			if node.rightNode != nil {
+//				totalHash.SetHalfValue(*node.rightNode.hash, 1)
+//			} else {
+//				totalHash.SetHalfValue(*node.nodeRightHashOrValueHash, 1)
+//			}
+//			hashObj, hashValue := utils.HashKeyAndValueByPointers(totalHash.ToUintArrayByPointer(), &utils.BranchCapacity)
+//			if !sdh.s.noSaveOnInsert {
+//				dataBuffer = append(dataBuffer, newSmtDfsHelperDataStruct(hashObj, hashValue))
+//
+//				if len(dataBuffer) >= bufferCapacity {
+//					bufferCopy := make([]*smtDfsHelperDataStruct, len(dataBuffer))
+//					copy(bufferCopy, dataBuffer)
+//					bufferWg.Add(1)
+//					go flushBuffer(bufferCopy)
+//					dataBuffer = dataBuffer[:0]
+//				}
+//			}
+//			node.hash = hashObj
+//			stack = stack[:currIdx]
+//		}
+//	}
+//
+//	if len(dataBuffer) > 0 && !sdh.s.noSaveOnInsert {
+//		bufferCopy := make([]*smtDfsHelperDataStruct, len(dataBuffer))
+//		copy(bufferCopy, dataBuffer)
+//		bufferWg.Add(1)
+//		go flushBuffer(bufferCopy)
+//	}
+//	bufferWg.Wait()
+//}
+//
+//func processChild(
+//	sdh *smtDfsHelper,
+//	child *smtBatchNode,
+//	path []int,
+//	level int,
+//	stack *[]stackFrame, // Now uses the package-level stackFrame type
+//	wg *sync.WaitGroup,
+//	maxGoroutineLevel int,
+//) {
+//	nextLevel := level + 1
+//
+//	pathCopy := make([]int, len(path))
+//	copy(pathCopy, path)
+//
+//	if level < maxGoroutineLevel {
+//		wg.Add(1)
+//		go func(n *smtBatchNode, p []int, l int) {
+//			defer wg.Done()
+//			calculateAndSaveHashesDfs(sdh, n, p, l)
+//		}(child, pathCopy, nextLevel)
+//	} else {
+//		*stack = append(*stack, stackFrame{node: child, level: nextLevel})
+//	}
+//}
+
+// =========== op9 ================
+
+//func calculateAndSaveHashesDfs(
+//	sdh *smtDfsHelper,
+//	smtBatchRootNode *smtBatchNode,
+//	path []int,
+//	level int,
+//) {
+//	type stackFrame struct {
+//		node  *smtBatchNode
+//		level int
+//		state uint8 // 0: 未处理, 1: 左子树处理完, 2: 两边处理完
+//	}
+//
+//	stack := make([]stackFrame, 0, 2048)
+//	stack = append(stack, stackFrame{node: smtBatchRootNode, level: level})
+//	var totalHash utils.NodeValue8
+//	var wg sync.WaitGroup
+//
+//	for len(stack) > 0 {
+//		currIdx := len(stack) - 1
+//		frame := &stack[currIdx]
+//		node := frame.node
+//		currentLevel := frame.level
+//
+//		if node.isLeaf() {
+//			leftHash := node.nodeLeftHashOrRemainingKey.AsUint64Pointer()
+//			rightHash := node.nodeRightHashOrValueHash.AsUint64Pointer()
+//			hashObj, hashValue := utils.HashKeyAndValueByPointers(
+//				utils.ConcatArrays4ByPointers(leftHash, rightHash),
+//				&utils.LeafCapacity,
+//			)
+//			node.hash = hashObj
+//			if !sdh.s.noSaveOnInsert {
+//				sdh.dataChan <- newSmtDfsHelperDataStruct(hashObj, hashValue)
+//				nodeKey := utils.JoinKey(path[:currentLevel], *node.nodeLeftHashOrRemainingKey)
+//				sdh.dataChan <- newSmtDfsHelperDataStruct(hashObj, nodeKey)
+//			}
+//			stack = stack[:currIdx]
+//			continue
+//		}
+//
+//		switch frame.state {
+//		case 0: // 处理左子树
+//			if node.leftNode != nil {
+//				path[currentLevel] = 0
+//				if currentLevel < 4 {
+//					wg.Add(1)
+//					go func(n *smtBatchNode, p []int, l int) {
+//						defer wg.Done()
+//						calculateAndSaveHashesDfs(sdh, n, p, l)
+//					}(node.leftNode, append([]int{}, path...), currentLevel+1)
+//				} else {
+//					stack = append(stack, stackFrame{node: node.leftNode, level: currentLevel + 1})
+//				}
+//				frame.state = 1
+//				continue
+//			}
+//			fallthrough
+//		case 1: // 处理右子树
+//			if node.rightNode != nil {
+//				path[currentLevel] = 1
+//				if currentLevel < 4 {
+//					wg.Add(1)
+//					go func(n *smtBatchNode, p []int, l int) {
+//						defer wg.Done()
+//						calculateAndSaveHashesDfs(sdh, n, p, l)
+//					}(node.rightNode, append([]int{}, path...), currentLevel+1)
+//				} else {
+//					stack = append(stack, stackFrame{node: node.rightNode, level: currentLevel + 1})
+//				}
+//				frame.state = 2
+//				continue
+//			}
+//			fallthrough
+//		case 2: // 计算哈希
+//			if currentLevel < 4 {
+//				wg.Wait()
+//			}
+//			if node.leftNode != nil {
+//				totalHash.SetHalfValue(*node.leftNode.hash, 0)
+//			} else {
+//				totalHash.SetHalfValue(*node.nodeLeftHashOrRemainingKey, 0)
+//			}
+//			if node.rightNode != nil {
+//				totalHash.SetHalfValue(*node.rightNode.hash, 1)
+//			} else {
+//				totalHash.SetHalfValue(*node.nodeRightHashOrValueHash, 1)
+//			}
+//			hashObj, hashValue := utils.HashKeyAndValueByPointers(totalHash.ToUintArrayByPointer(), &utils.BranchCapacity)
+//			if !sdh.s.noSaveOnInsert {
+//				sdh.dataChan <- newSmtDfsHelperDataStruct(hashObj, hashValue)
+//			}
+//			node.hash = hashObj
+//			stack = stack[:currIdx]
+//		}
+//	}
+//}
+
+// =========== op10 ================
+
+//func calculateAndSaveHashesDfs(
+//	sdh *smtDfsHelper,
+//	smtBatchRootNode *smtBatchNode,
+//	path []int,
+//	level int,
+//) {
+//	type stackFrame struct {
+//		node           *smtBatchNode
+//		level          int
+//		leftProcessed  bool
+//		rightProcessed bool
+//	}
+//
+//	// 预分配栈容量为1024，减少动态扩容
+//	stack := make([]stackFrame, 0, 1024)
+//	stack = append(stack, stackFrame{node: smtBatchRootNode, level: level})
+//	var totalHash utils.NodeValue8
+//	var wg sync.WaitGroup
+//
+//	for len(stack) > 0 {
+//		// 使用索引访问栈顶元素
+//		currIdx := len(stack) - 1
+//		frame := &stack[currIdx]
+//		node := frame.node
+//		currentLevel := frame.level
+//
+//		if node.isLeaf() {
+//			leftHash := node.nodeLeftHashOrRemainingKey.AsUint64Pointer()
+//			rightHash := node.nodeRightHashOrValueHash.AsUint64Pointer()
+//			hashObj, hashValue := utils.HashKeyAndValueByPointers(
+//				utils.ConcatArrays4ByPointers(leftHash, rightHash),
+//				&utils.LeafCapacity,
+//			)
+//			node.hash = hashObj
+//			if !sdh.s.noSaveOnInsert {
+//				sdh.dataChan <- newSmtDfsHelperDataStruct(hashObj, hashValue)
+//				nodeKey := utils.JoinKey(path[:currentLevel], *node.nodeLeftHashOrRemainingKey)
+//				sdh.dataChan <- newSmtDfsHelperDataStruct(hashObj, nodeKey)
+//			}
+//			stack = stack[:currIdx]
+//			continue
+//		}
+//
+//		// 处理左子树
+//		if node.leftNode != nil && !frame.leftProcessed {
+//			path[currentLevel] = 0
+//			if currentLevel < 4 {
+//				wg.Add(1)
+//				go func(n *smtBatchNode, p []int, l int) {
+//					defer wg.Done()
+//					calculateAndSaveHashesDfs(sdh, n, p, l)
+//				}(node.leftNode, append([]int{}, path...), currentLevel+1)
+//			} else {
+//				stack = append(stack, stackFrame{node: node.leftNode, level: currentLevel + 1})
+//			}
+//			frame.leftProcessed = true
+//			continue
+//		}
+//
+//		// 处理右子树
+//		if node.rightNode != nil && !frame.rightProcessed {
+//			path[currentLevel] = 1
+//			if currentLevel < 4 {
+//				wg.Add(1)
+//				go func(n *smtBatchNode, p []int, l int) {
+//					defer wg.Done()
+//					calculateAndSaveHashesDfs(sdh, n, p, l)
+//				}(node.rightNode, append([]int{}, path...), currentLevel+1)
+//			} else {
+//				stack = append(stack, stackFrame{node: node.rightNode, level: currentLevel + 1})
+//			}
+//			frame.rightProcessed = true
+//			continue
+//		}
+//
+//		if currentLevel < 4 {
+//			wg.Wait()
+//		}
+//
+//		if node.leftNode != nil {
+//			totalHash.SetHalfValue(*node.leftNode.hash, 0)
+//		} else {
+//			totalHash.SetHalfValue(*node.nodeLeftHashOrRemainingKey, 0)
+//		}
+//		if node.rightNode != nil {
+//			totalHash.SetHalfValue(*node.rightNode.hash, 1)
+//		} else {
+//			totalHash.SetHalfValue(*node.nodeRightHashOrValueHash, 1)
+//		}
+//
+//		hashObj, hashValue := utils.HashKeyAndValueByPointers(totalHash.ToUintArrayByPointer(), &utils.BranchCapacity)
+//		if !sdh.s.noSaveOnInsert {
+//			sdh.dataChan <- newSmtDfsHelperDataStruct(hashObj, hashValue)
+//		}
+//		node.hash = hashObj
+//		stack = stack[:currIdx]
+//	}
+//}
+
+// =========== op11 ================
+
+//func calculateAndSaveHashesDfs(
+//	sdh *smtDfsHelper,
+//	smtBatchRootNode *smtBatchNode,
+//	path []int,
+//	level int,
+//) {
+//	type stackFrame struct {
+//		node           *smtBatchNode
+//		level          int
+//		leftProcessed  bool
+//		rightProcessed bool
+//	}
+//
+//	// Use a stack for DFS traversal
+//	stack := []stackFrame{{node: smtBatchRootNode, level: level}}
+//	var totalHash utils.NodeValue8
+//	var wg sync.WaitGroup
+//
+//	// To reduce slice copying, modify the stack traversal
+//	for len(stack) > 0 {
+//		frame := &stack[len(stack)-1]
+//		node := frame.node
+//		currentLevel := frame.level
+//
+//		if node.isLeaf() {
+//			// Handle leaf node
+//			leftHash := node.nodeLeftHashOrRemainingKey.AsUint64Pointer()
+//			rightHash := node.nodeRightHashOrValueHash.AsUint64Pointer()
+//			hashObj, hashValue := utils.HashKeyAndValueByPointers(utils.ConcatArrays4ByPointers(leftHash, rightHash), &utils.LeafCapacity)
+//			node.hash = hashObj
+//			if !sdh.s.noSaveOnInsert {
+//				sdh.dataChan <- newSmtDfsHelperDataStruct(hashObj, hashValue)
+//				nodeKey := utils.JoinKey(path[:currentLevel], *node.nodeLeftHashOrRemainingKey)
+//				sdh.dataChan <- newSmtDfsHelperDataStruct(hashObj, nodeKey)
+//			}
+//			stack = stack[:len(stack)-1]
+//			continue
+//		}
+//
+//		// Handle left subtree processing
+//		if node.leftNode != nil && !frame.leftProcessed {
+//			path[currentLevel] = 0
+//			if currentLevel < 4 { // Limit Goroutine creation
+//				wg.Add(1)
+//				go func(n *smtBatchNode, p []int, l int) {
+//					defer wg.Done()
+//					calculateAndSaveHashesDfs(sdh, n, p, l)
+//				}(node.leftNode, append([]int{}, path...), currentLevel+1)
+//			} else {
+//				stack = append(stack, stackFrame{node: node.leftNode, level: currentLevel + 1})
+//			}
+//			frame.leftProcessed = true
+//			continue
+//		}
+//
+//		// Handle right subtree processing
+//		if node.rightNode != nil && !frame.rightProcessed {
+//			path[currentLevel] = 1
+//			if currentLevel < 4 { // Limit Goroutine creation
+//				wg.Add(1)
+//				go func(n *smtBatchNode, p []int, l int) {
+//					defer wg.Done()
+//					calculateAndSaveHashesDfs(sdh, n, p, l)
+//				}(node.rightNode, append([]int{}, path...), currentLevel+1)
+//			} else {
+//				stack = append(stack, stackFrame{node: node.rightNode, level: currentLevel + 1})
+//			}
+//			frame.rightProcessed = true
+//			continue
+//		}
+//
+//		// If we've created Goroutines, wait for them to finish
+//		if currentLevel < 4 {
+//			wg.Wait()
+//		}
+//
+//		// Both left and right child processed, calculate current node's hash
+//		if node.leftNode != nil {
+//			totalHash.SetHalfValue(*node.leftNode.hash, 0)
+//		} else {
+//			totalHash.SetHalfValue(*node.nodeLeftHashOrRemainingKey, 0)
+//		}
+//
+//		if node.rightNode != nil {
+//			totalHash.SetHalfValue(*node.rightNode.hash, 1)
+//		} else {
+//			totalHash.SetHalfValue(*node.nodeRightHashOrValueHash, 1)
+//		}
+//
+//		hashObj, hashValue := utils.HashKeyAndValueByPointers(totalHash.ToUintArrayByPointer(), &utils.BranchCapacity)
+//		if !sdh.s.noSaveOnInsert {
+//			sdh.dataChan <- newSmtDfsHelperDataStruct(hashObj, hashValue)
+//		}
+//		node.hash = hashObj
+//
+//		stack = stack[:len(stack)-1]
+//	}
+//}
+
+// =========== op12 ================
+
+//func calculateAndSaveHashesDfs(
+//	sdh *smtDfsHelper,
+//	smtBatchRootNode *smtBatchNode,
+//	path []int,
+//	level int,
+//) {
+//	type stackFrame struct {
+//		node           *smtBatchNode
+//		level          int
+//		leftProcessed  bool
+//		rightProcessed bool
+//	}
+//
+//	stack := []stackFrame{{node: smtBatchRootNode, level: level}}
+//	var totalHash utils.NodeValue8
+//	var wg sync.WaitGroup
+//
+//	for len(stack) > 0 {
+//		frame := &stack[len(stack)-1] // 获取栈顶元素的引用
+//		node := frame.node
+//		currentLevel := frame.level
+//
+//		if node.isLeaf() {
+//			// 处理叶子节点
+//			leftHash := node.nodeLeftHashOrRemainingKey.AsUint64Pointer()
+//			rightHash := node.nodeRightHashOrValueHash.AsUint64Pointer()
+//			hashObj, hashValue := utils.HashKeyAndValueByPointers(utils.ConcatArrays4ByPointers(leftHash, rightHash), &utils.LeafCapacity)
+//			node.hash = hashObj
+//			if !sdh.s.noSaveOnInsert {
+//				sdh.dataChan <- newSmtDfsHelperDataStruct(hashObj, hashValue)
+//				nodeKey := utils.JoinKey(path[:currentLevel], *node.nodeLeftHashOrRemainingKey)
+//				sdh.dataChan <- newSmtDfsHelperDataStruct(hashObj, nodeKey)
+//			}
+//			// 弹出栈顶元素
+//			stack = stack[:len(stack)-1]
+//			continue
+//		}
+//
+//		// 控制 Goroutine 的创建：只在特定深度启动 Goroutine
+//		useGoroutine := currentLevel < 4 // 例如，在前 4 层启动 Goroutine
+//
+//		// 处理左子树
+//		if node.leftNode != nil && !frame.leftProcessed {
+//			path[currentLevel] = 0
+//			if useGoroutine {
+//				wg.Add(1)
+//				go func(n *smtBatchNode, p []int, l int) {
+//					defer wg.Done()
+//					calculateAndSaveHashesDfs(sdh, n, p, l)
+//				}(node.leftNode, append([]int{}, path...), currentLevel+1)
+//			} else {
+//				stack = append(stack, stackFrame{node: node.leftNode, level: currentLevel + 1})
+//			}
+//			frame.leftProcessed = true
+//			continue
+//		}
+//
+//		// 处理右子树
+//		if node.rightNode != nil && !frame.rightProcessed {
+//			path[currentLevel] = 1
+//			if useGoroutine {
+//				wg.Add(1)
+//				go func(n *smtBatchNode, p []int, l int) {
+//					defer wg.Done()
+//					calculateAndSaveHashesDfs(sdh, n, p, l)
+//				}(node.rightNode, append([]int{}, path...), currentLevel+1)
+//			} else {
+//				stack = append(stack, stackFrame{node: node.rightNode, level: currentLevel + 1})
+//			}
+//			frame.rightProcessed = true
+//			continue
+//		}
+//
+//		// 等待 Goroutine 完成（如果有）
+//		if useGoroutine {
+//			wg.Wait()
+//		}
+//
+//		// 左右子树都处理完毕，计算当前节点的哈希值
+//		if node.leftNode != nil {
+//			totalHash.SetHalfValue(*node.leftNode.hash, 0)
+//		} else {
+//			totalHash.SetHalfValue(*node.nodeLeftHashOrRemainingKey, 0)
+//		}
+//
+//		if node.rightNode != nil {
+//			totalHash.SetHalfValue(*node.rightNode.hash, 1)
+//		} else {
+//			totalHash.SetHalfValue(*node.nodeRightHashOrValueHash, 1)
+//		}
+//
+//		hashObj, hashValue := utils.HashKeyAndValueByPointers(totalHash.ToUintArrayByPointer(), &utils.BranchCapacity)
+//		if !sdh.s.noSaveOnInsert {
+//			sdh.dataChan <- newSmtDfsHelperDataStruct(hashObj, hashValue)
+//		}
+//		node.hash = hashObj
+//
+//		// 弹出栈顶元素
+//		stack = stack[:len(stack)-1]
+//	}
+//}
+
+// =========== op13 ================
+
+//func calculateAndSaveHashesDfs(
+//	sdh *smtDfsHelper,
+//	smtBatchRootNode *smtBatchNode,
+//	path []int,
+//	level int,
+//) {
+//	type stackFrame struct {
+//		node           *smtBatchNode
+//		level          int
+//		leftProcessed  bool
+//		rightProcessed bool
+//	}
+//
+//	stack := []stackFrame{{node: smtBatchRootNode, level: level}}
+//	var totalHash utils.NodeValue8
+//	var wg sync.WaitGroup
+//
+//	for len(stack) > 0 {
+//		frame := &stack[len(stack)-1] // 获取栈顶元素的引用
+//		node := frame.node
+//		currentLevel := frame.level
+//
+//		if node.isLeaf() {
+//			// 处理叶子节点
+//			leftHash := node.nodeLeftHashOrRemainingKey.AsUint64Pointer()
+//			rightHash := node.nodeRightHashOrValueHash.AsUint64Pointer()
+//			hashObj, hashValue := utils.HashKeyAndValueByPointers(utils.ConcatArrays4ByPointers(leftHash, rightHash), &utils.LeafCapacity)
+//			node.hash = hashObj
+//			if !sdh.s.noSaveOnInsert {
+//				sdh.dataChan <- newSmtDfsHelperDataStruct(hashObj, hashValue)
+//				nodeKey := utils.JoinKey(path[:currentLevel], *node.nodeLeftHashOrRemainingKey)
+//				sdh.dataChan <- newSmtDfsHelperDataStruct(hashObj, nodeKey)
+//			}
+//			// 弹出栈顶元素
+//			stack = stack[:len(stack)-1]
+//			continue
+//		}
+//
+//		// 处理左子树
+//		if node.leftNode != nil && !frame.leftProcessed {
+//			path[currentLevel] = 0
+//			wg.Add(1)
+//			go func(n *smtBatchNode, p []int, l int) {
+//				defer wg.Done()
+//				calculateAndSaveHashesDfs(sdh, n, p, l)
+//			}(node.leftNode, append([]int{}, path...), currentLevel+1)
+//			frame.leftProcessed = true
+//			continue
+//		}
+//
+//		// 处理右子树
+//		if node.rightNode != nil && !frame.rightProcessed {
+//			path[currentLevel] = 1
+//			wg.Add(1)
+//			go func(n *smtBatchNode, p []int, l int) {
+//				defer wg.Done()
+//				calculateAndSaveHashesDfs(sdh, n, p, l)
+//			}(node.rightNode, append([]int{}, path...), currentLevel+1)
+//			frame.rightProcessed = true
+//			continue
+//		}
+//
+//		// 等待左右子树的 Goroutine 完成
+//		wg.Wait()
+//
+//		// 左右子树都处理完毕，计算当前节点的哈希值
+//		if node.leftNode != nil {
+//			totalHash.SetHalfValue(*node.leftNode.hash, 0)
+//		} else {
+//			totalHash.SetHalfValue(*node.nodeLeftHashOrRemainingKey, 0)
+//		}
+//
+//		if node.rightNode != nil {
+//			totalHash.SetHalfValue(*node.rightNode.hash, 1)
+//		} else {
+//			totalHash.SetHalfValue(*node.nodeRightHashOrValueHash, 1)
+//		}
+//
+//		hashObj, hashValue := utils.HashKeyAndValueByPointers(totalHash.ToUintArrayByPointer(), &utils.BranchCapacity)
+//		if !sdh.s.noSaveOnInsert {
+//			sdh.dataChan <- newSmtDfsHelperDataStruct(hashObj, hashValue)
+//		}
+//		node.hash = hashObj
+//
+//		// 弹出栈顶元素
+//		stack = stack[:len(stack)-1]
+//	}
+//}
+
+// =========== op14 ================
+
+//func calculateAndSaveHashesDfs(
+//	sdh *smtDfsHelper,
+//	smtBatchRootNode *smtBatchNode,
+//	path []int,
+//	level int,
+//) {
+//	type stackFrame struct {
+//		node           *smtBatchNode
+//		level          int
+//		leftProcessed  bool
+//		rightProcessed bool
+//	}
+//
+//	stack := []stackFrame{{node: smtBatchRootNode, level: level}}
+//	var totalHash utils.NodeValue8
+//
+//	for len(stack) > 0 {
+//		frame := &stack[len(stack)-1] // 获取栈顶元素的引用
+//		node := frame.node
+//		currentLevel := frame.level
+//
+//		if node.isLeaf() {
+//			// 处理叶子节点
+//			leftHash := node.nodeLeftHashOrRemainingKey.AsUint64Pointer()
+//			rightHash := node.nodeRightHashOrValueHash.AsUint64Pointer()
+//			hashObj, hashValue := utils.HashKeyAndValueByPointers(utils.ConcatArrays4ByPointers(leftHash, rightHash), &utils.LeafCapacity)
+//			node.hash = hashObj
+//			if !sdh.s.noSaveOnInsert {
+//				sdh.dataChan <- newSmtDfsHelperDataStruct(hashObj, hashValue)
+//				nodeKey := utils.JoinKey(path[:currentLevel], *node.nodeLeftHashOrRemainingKey)
+//				sdh.dataChan <- newSmtDfsHelperDataStruct(hashObj, nodeKey)
+//			}
+//			// 弹出栈顶元素
+//			stack = stack[:len(stack)-1]
+//			continue
+//		}
+//
+//		// 处理左子树
+//		if node.leftNode != nil && !frame.leftProcessed {
+//			path[currentLevel] = 0
+//			stack = append(stack, stackFrame{node: node.leftNode, level: currentLevel + 1})
+//			frame.leftProcessed = true
+//			continue
+//		}
+//
+//		// 处理右子树
+//		if node.rightNode != nil && !frame.rightProcessed {
+//			path[currentLevel] = 1
+//			stack = append(stack, stackFrame{node: node.rightNode, level: currentLevel + 1})
+//			frame.rightProcessed = true
+//			continue
+//		}
+//
+//		// 左右子树都处理完毕，计算当前节点的哈希值
+//		if node.leftNode != nil {
+//			totalHash.SetHalfValue(*node.leftNode.hash, 0)
+//		} else {
+//			totalHash.SetHalfValue(*node.nodeLeftHashOrRemainingKey, 0)
+//		}
+//
+//		if node.rightNode != nil {
+//			totalHash.SetHalfValue(*node.rightNode.hash, 1)
+//		} else {
+//			totalHash.SetHalfValue(*node.nodeRightHashOrValueHash, 1)
+//		}
+//
+//		hashObj, hashValue := utils.HashKeyAndValueByPointers(totalHash.ToUintArrayByPointer(), &utils.BranchCapacity)
+//		if !sdh.s.noSaveOnInsert {
+//			sdh.dataChan <- newSmtDfsHelperDataStruct(hashObj, hashValue)
+//		}
+//		node.hash = hashObj
+//
+//		// 弹出栈顶元素
+//		stack = stack[:len(stack)-1]
+//	}
+//}
+
+// =========== op15 ================
+
+//func calculateAndSaveHashesDfs(
+//	sdh *smtDfsHelper,
+//	smtBatchRootNode *smtBatchNode,
+//	path []int,
+//	level int,
+//) {
+//	type stackFrame struct {
+//		node  *smtBatchNode
+//		path  []int
+//		level int
+//		// 标记是否已经处理过左子树或右子树
+//		leftProcessed  bool
+//		rightProcessed bool
+//		// 用于保存中间计算的哈希值
+//		leftHash  *utils.NodeValue8
+//		rightHash *utils.NodeValue8
+//	}
+//
+//	stack := []stackFrame{{node: smtBatchRootNode, path: path, level: level}}
+//
+//	var totalHash utils.NodeValue8
+//
+//	for len(stack) > 0 {
+//		frame := &stack[len(stack)-1] // 获取栈顶元素的引用
+//		node := frame.node
+//		path := frame.path
+//		level := frame.level
+//
+//		if node.isLeaf() {
+//			// 处理叶子节点
+//			hashObj, hashValue := utils.HashKeyAndValueByPointers(
+//				utils.ConcatArrays4ByPointers(node.nodeLeftHashOrRemainingKey.AsUint64Pointer(), node.nodeRightHashOrValueHash.AsUint64Pointer()),
+//				&utils.LeafCapacity,
+//			)
+//			node.hash = hashObj
+//			if !sdh.s.noSaveOnInsert {
+//				sdh.dataChan <- newSmtDfsHelperDataStruct(hashObj, hashValue)
+//
+//				nodeKey := utils.JoinKey(path[:level], *node.nodeLeftHashOrRemainingKey)
+//				sdh.dataChan <- newSmtDfsHelperDataStruct(hashObj, nodeKey)
+//			}
+//			// 弹出栈顶元素
+//			stack = stack[:len(stack)-1]
+//			continue
+//		}
+//
+//		// 处理左子树
+//		if node.leftNode != nil && !frame.leftProcessed {
+//			newPath := make([]int, len(path))
+//			copy(newPath, path)
+//			newPath[level] = 0
+//			stack = append(stack, stackFrame{node: node.leftNode, path: newPath, level: level + 1})
+//			frame.leftProcessed = true
+//			continue
+//		}
+//
+//		// 处理右子树
+//		if node.rightNode != nil && !frame.rightProcessed {
+//			newPath := make([]int, len(path))
+//			copy(newPath, path)
+//			newPath[level] = 1
+//			stack = append(stack, stackFrame{node: node.rightNode, path: newPath, level: level + 1})
+//			frame.rightProcessed = true
+//			continue
+//		}
+//
+//		// 左右子树都处理完毕，计算当前节点的哈希值
+//		if node.leftNode != nil {
+//			totalHash.SetHalfValue(*node.leftNode.hash, 0)
+//		} else {
+//			totalHash.SetHalfValue(*node.nodeLeftHashOrRemainingKey, 0)
+//		}
+//
+//		if node.rightNode != nil {
+//			totalHash.SetHalfValue(*node.rightNode.hash, 1)
+//		} else {
+//			totalHash.SetHalfValue(*node.nodeRightHashOrValueHash, 1)
+//		}
+//
+//		hashObj, hashValue := utils.HashKeyAndValueByPointers(totalHash.ToUintArrayByPointer(), &utils.BranchCapacity)
+//		if !sdh.s.noSaveOnInsert {
+//			sdh.dataChan <- newSmtDfsHelperDataStruct(hashObj, hashValue)
+//		}
+//		node.hash = hashObj
+//
+//		// 弹出栈顶元素
+//		stack = stack[:len(stack)-1]
+//	}
+//}
+
+// =========== op16  good ================
+
+//func calculateAndSaveHashesDfs(
+//	sdh *smtDfsHelper,
+//	smtBatchRootNode *smtBatchNode,
+//	path []int,
+//	level int,
+//) {
+//	noSave := sdh.s.noSaveOnInsert
+//	dataChan := sdh.dataChan
+//
+//	// 使用 sync.Pool 复用 path 切片
+//	var pathPool = sync.Pool{
+//		New: func() interface{} {
+//			return make([]int, cap(path)) // 使用 cap 避免长度不足
+//		},
+//	}
+//
+//	// 控制最大并发 goroutine 数量，动态适应 CPU
+//	maxConcurrency := runtime.GOMAXPROCS(0) * 2 // 动态调整并发数
+//	var wg sync.WaitGroup
+//	sem := make(chan struct{}, maxConcurrency)
+//
+//	// 内联叶子节点处理，减少嵌套
+//	if smtBatchRootNode.isLeaf() {
+//		hashObj, hashValue := utils.HashKeyAndValueByPointers(
+//			utils.ConcatArrays4ByPointers(
+//				smtBatchRootNode.nodeLeftHashOrRemainingKey.AsUint64Pointer(),
+//				smtBatchRootNode.nodeRightHashOrValueHash.AsUint64Pointer(),
+//			),
+//			&utils.LeafCapacity,
+//		)
+//		smtBatchRootNode.hash = hashObj
+//
+//		if !noSave {
+//			buffer1 := newSmtDfsHelperDataStruct(hashObj, hashValue)
+//			buffer2 := newSmtDfsHelperDataStruct(hashObj, utils.JoinKey(path[:level], *smtBatchRootNode.nodeLeftHashOrRemainingKey))
+//			// 单次检查通道状态，减少开销
+//			if len(dataChan) < cap(dataChan) {
+//				dataChan <- buffer1
+//				dataChan <- buffer2
+//			}
+//		}
+//		return
+//	}
+//
+//	var totalHash utils.NodeValue8
+//
+//	// 内联 processChild 逻辑，减少闭包开销
+//	for i, child := range [2]*smtBatchNode{smtBatchRootNode.leftNode, smtBatchRootNode.rightNode} { // 使用数组替代切片
+//		if child != nil {
+//			if level < 3 { // 浅层串行处理
+//				path[level] = i
+//				calculateAndSaveHashesDfs(sdh, child, path, level+1)
+//				totalHash.SetHalfValue(*child.hash, i)
+//			} else { // 深层并行处理
+//				wg.Add(1)
+//				sem <- struct{}{}
+//				childPath := pathPool.Get().([]int)[:len(path)] // 调整长度
+//				copy(childPath, path)
+//				childPath[level] = i
+//				go func(c *smtBatchNode, p []int) {
+//					defer func() { <-sem; pathPool.Put(p); wg.Done() }()
+//					calculateAndSaveHashesDfs(sdh, c, p, level+1)
+//				}(child, childPath)
+//			}
+//		} else {
+//			defaultHash := smtBatchRootNode.nodeLeftHashOrRemainingKey
+//			if i == 1 {
+//				defaultHash = smtBatchRootNode.nodeRightHashOrValueHash
+//			}
+//			totalHash.SetHalfValue(*defaultHash, i)
+//		}
+//	}
+//
+//	// 等待所有 goroutine 完成
+//	wg.Wait()
+//
+//	// 更新当前节点哈希，内联循环
+//	if smtBatchRootNode.leftNode != nil {
+//		totalHash.SetHalfValue(*smtBatchRootNode.leftNode.hash, 0)
+//	}
+//	if smtBatchRootNode.rightNode != nil {
+//		totalHash.SetHalfValue(*smtBatchRootNode.rightNode.hash, 1)
+//	}
+//
+//	hashObj, hashValue := utils.HashKeyAndValueByPointers(totalHash.ToUintArrayByPointer(), &utils.BranchCapacity)
+//	smtBatchRootNode.hash = hashObj
+//
+//	if !noSave && len(dataChan) < cap(dataChan) {
+//		dataChan <- newSmtDfsHelperDataStruct(hashObj, hashValue)
+//	}
+//}
+
+// =========== op17 ================
 
 //func calculateAndSaveHashesDfs(
 //	sdh *smtDfsHelper,
@@ -1058,6 +2141,8 @@ func calculateAndSaveHashesDfs(
 //		dataChan <- newSmtDfsHelperDataStruct(hashObj, hashValue)
 //	}
 //}
+
+// =========== op18 ================
 
 //func calculateAndSaveHashesDfs(
 //	sdh *smtDfsHelper,
@@ -1157,6 +2242,8 @@ func calculateAndSaveHashesDfs(
 //		}
 //	}
 //}
+
+// =========== op19 ================
 
 //func calculateAndSaveHashesDfs(
 //	sdh *smtDfsHelper,
@@ -1264,6 +2351,8 @@ func calculateAndSaveHashesDfs(
 //	}
 //}
 
+// =========== op20 ================
+
 //func calculateAndSaveHashesDfs(
 //	sdh *smtDfsHelper,
 //	smtBatchRootNode *smtBatchNode,
@@ -1346,6 +2435,8 @@ func calculateAndSaveHashesDfs(
 //	}
 //}
 
+// =========== op21 ================
+
 //func calculateAndSaveHashesDfs(
 //	sdh *smtDfsHelper,
 //	smtBatchRootNode *smtBatchNode,
@@ -1403,6 +2494,8 @@ func calculateAndSaveHashesDfs(
 //	}
 //}
 
+// =========== op22 ================
+
 //func calculateAndSaveHashesDfs(
 //	sdh *smtDfsHelper,
 //	smtBatchRootNode *smtBatchNode,
@@ -1457,6 +2550,8 @@ func calculateAndSaveHashesDfs(
 //		sdh.dataChan <- newSmtDfsHelperDataStruct(hashObj, hashValue)
 //	}
 //}
+
+// =========== op23 ================
 
 //func calculateAndSaveHashesDfs(
 //	sdh *smtDfsHelper,
@@ -1519,6 +2614,8 @@ func calculateAndSaveHashesDfs(
 //		sdh.dataChan <- data // 解引用后发送
 //	}
 //}
+
+// =========== op24 ================
 
 //// no point to parallelize this function because db consumer is slower than this producer
 //func calculateAndSaveHashesDfs(
