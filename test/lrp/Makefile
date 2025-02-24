@@ -1,13 +1,13 @@
 # global & shell env variables
-USER_PREFIX = $(shell awk '/^user:/ {print $$2}' lrp.config.yaml)
+USER_PREFIX = $(shell awk '/^user:/ {print $$2}' lrp.config.yaml 2>/dev/null || true)
 IMAGE_TAG = $(USER_PREFIX)-$(shell git rev-parse --short HEAD)
 export USER_PREFIX IMAGE_TAG
-PORT_DIFF = $(shell awk '/^portDiff:/ {print $$2}' lrp.config.yaml)
-PPROF_PORT = $(shell echo $$((6060 + $(PORT_DIFF))))
-RPC_PORT = $(shell echo $$((8545 + $(PORT_DIFF))))
-DS_PORT = $(shell echo $$((6900 + $(PORT_DIFF))))
-METRICS_PORT = $(shell echo $$((9095 + $(PORT_DIFF))))
-EXTERNAL_DS_PORT = $(shell echo $$((16900 + $(PORT_DIFF))))
+PORT_DIFF = $(shell awk '/^portDiff:/ {print $$2}' lrp.config.yaml 2>/dev/null || true)
+PPROF_PORT = $(shell echo $$((6060 + $(PORT_DIFF))) 2>/dev/null || true)
+RPC_PORT = $(shell echo $$((8545 + $(PORT_DIFF))) 2>/dev/null || true)
+DS_PORT = $(shell echo $$((6900 + $(PORT_DIFF))) 2>/dev/null || true)
+METRICS_PORT = $(shell echo $$((9095 + $(PORT_DIFF))) 2>/dev/null || true)
+EXTERNAL_DS_PORT = $(shell echo $$((16900 + $(PORT_DIFF))) 2>/dev/null || true)
 export PPROF_PORT RPC_PORT DS_PORT METRICS_PORT EXTERNAL_DS_PORT
 
 DOCKER_COMPOSE := docker compose -f docker-compose.yml -p $(USER_PREFIX)-xlayer-lrp
@@ -29,39 +29,62 @@ BLOCKHASHES_LOG_FILE := blockhashes.log
 
 .PHONY: lrp-build-docker
 lrp-build-docker: # Build cdk-erigoin for lrp
-	@docker build -t cdk-erigon:$(IMAGE_TAG) -f ../../Dockerfile.local ../../
+	@GIT_ROOT=$$(git rev-parse --show-toplevel); \
+	docker build -t cdk-erigon:$(IMAGE_TAG) -f $$GIT_ROOT/Dockerfile.local $$GIT_ROOT
 
 .PHONY: lrp-config
 lrp-config:
-	@read -p "Enter fromBatchNumber: " FROM_BATCH_NO; \
-	read -p "Enter toBatchNumber: " TO_BATCH_NO; \
+	@while true; do \
+		read -p "Enter fromBatchNumber: " FROM_BATCH_NO; \
+		if [ "$$FROM_BATCH_NO" -ge 134466 ]; then \
+			break; \
+		else \
+			echo "Error: fromBatchNumber must be greater than or equal to 134466"; \
+		fi; \
+	done; \
+	while true; do \
+		read -p "Enter toBatchNumber: " TO_BATCH_NO; \
+		if [ "$$TO_BATCH_NO" -ge "$$FROM_BATCH_NO" ]; then \
+			break; \
+		else \
+			echo "Error: toBatchNumber must be greater than or equal to fromBatchNumber ($$FROM_BATCH_NO)"; \
+		fi; \
+	done; \
 	read -p "Use external datastream? (y/n): " USE_EXTERNAL_DS; \
+	if [ "$$USE_EXTERNAL_DS" = "y" ]; then \
+		EXTERNAL_DS="true"; \
+	else \
+		EXTERNAL_DS="false"; \
+	fi; \
 	read -p "Enter user: " USER_NAME; \
 	if [ -z "$$USER_NAME" ]; then \
 		USER_NAME=$$(if [ -n "$$SUDO_USER" ]; then echo "$$SUDO_USER"; else echo "$$USER"; fi); \
 	fi; \
 	read -p "Enter portDiff: " PORT_DIFF; \
 	UNWIND_BATCH_NO=$$((FROM_BATCH_NO - 1)); \
-	if [ "$$USE_EXTERNAL_DS" = "y" ]; then \
-		EXTERNAL_DS="true"; \
-	else \
-		EXTERNAL_DS="false"; \
-	fi; \
+	GIT_COMMIT=$$(git rev-parse --short HEAD); \
 	if [ "$(shell uname)" = "Darwin" ]; then \
 		sed -i '' "s/--unwind-batch-no=[0-9]*/--unwind-batch-no=$$UNWIND_BATCH_NO/" docker-compose.yml; \
 		sed -i '' "s/--zkevm.sequencer-resequence-halt-on-batch-number=[0-9]*/--zkevm.sequencer-resequence-halt-on-batch-number=$$TO_BATCH_NO/" docker-compose.yml; \
 		sed -i '' "s/--zkevm.sequencer-resequence-external-datastream=\(true\|false\)/--zkevm.sequencer-resequence-external-datastream=$$EXTERNAL_DS/" docker-compose.yml; \
+		sed -i '' "s|- .*:/home/data-stream.bin|- ./external_ds/data-stream.bin:/home/data-stream.bin|" docker-compose.yml; \
+		sed -i '' "s|- .*:/home/data-stream.db/|- ./external_ds/data-stream.db:/home/data-stream.db/|" docker-compose.yml; \
 	else \
 		sed -i "s/--unwind-batch-no=[0-9]*/--unwind-batch-no=$$UNWIND_BATCH_NO/" docker-compose.yml; \
 		sed -i "s/--zkevm.sequencer-resequence-halt-on-batch-number=[0-9]*/--zkevm.sequencer-resequence-halt-on-batch-number=$$TO_BATCH_NO/" docker-compose.yml; \
 		sed -i "s/--zkevm.sequencer-resequence-external-datastream=\(true\|false\)/--zkevm.sequencer-resequence-external-datastream=$$EXTERNAL_DS/" docker-compose.yml; \
+		sed -i "s|- .*:/home/data-stream.bin|- ./external_ds/data-stream.bin:/home/data-stream.bin|" docker-compose.yml; \
+		sed -i "s|- .*:/home/data-stream.db/|- ./external_ds/data-stream.db:/home/data-stream.db/|" docker-compose.yml; \
 	fi; \
 	if [ ! -f lrp.config.yaml ]; then \
-		echo "fromBatchNumber: $$FROM_BATCH_NO" > lrp.config.yaml; \
+		echo "user: $$USER_NAME" > lrp.config.yaml; \
+		echo "gitCommit: $$GIT_COMMIT" >> lrp.config.yaml; \
+		echo "portDiff: $$PORT_DIFF" >> lrp.config.yaml; \
+		echo "fromBatchNumber: $$FROM_BATCH_NO" >> lrp.config.yaml; \
 		echo "toBatchNumber: $$TO_BATCH_NO" >> lrp.config.yaml; \
 		echo "useExternalDatastream: $$EXTERNAL_DS" >> lrp.config.yaml; \
-		echo "user: $$USER_NAME" >> lrp.config.yaml; \
-		echo "portDiff: $$PORT_DIFF" >> lrp.config.yaml; \
+		echo "externalDatastreamPath: " >> lrp.config.yaml; \
+		echo "srcMainnetDataPath: " >> lrp.config.yaml; \
 	else \
 		if [ "$(shell uname)" = "Darwin" ]; then \
 			sed -i '' "s/^fromBatchNumber:.*/fromBatchNumber: $$FROM_BATCH_NO/" lrp.config.yaml; \
@@ -69,31 +92,48 @@ lrp-config:
 			sed -i '' "s/^useExternalDatastream:.*/useExternalDatastream: $$EXTERNAL_DS/" lrp.config.yaml; \
 			sed -i '' "s/^user:.*/user: $$USER_NAME/" lrp.config.yaml; \
 			sed -i '' "s/^portDiff:.*/portDiff: $$PORT_DIFF/" lrp.config.yaml; \
+			sed -i '' "s/^gitCommit:.*/gitCommit: $$GIT_COMMIT/" lrp.config.yaml; \
 			if ! grep -q "^fromBatchNumber:" lrp.config.yaml; then echo "fromBatchNumber: $$FROM_BATCH_NO" >> lrp.config.yaml; fi; \
 			if ! grep -q "^toBatchNumber:" lrp.config.yaml; then echo "toBatchNumber: $$TO_BATCH_NO" >> lrp.config.yaml; fi; \
 			if ! grep -q "^useExternalDatastream:" lrp.config.yaml; then echo "useExternalDatastream: $$EXTERNAL_DS" >> lrp.config.yaml; fi; \
 			if ! grep -q "^user:" lrp.config.yaml; then echo "user: $$USER_NAME" >> lrp.config.yaml; fi; \
 			if ! grep -q "^portDiff:" lrp.config.yaml; then echo "portDiff: $$PORT_DIFF" >> lrp.config.yaml; fi; \
+			if ! grep -q "^gitCommit:" lrp.config.yaml; then echo "gitCommit: $$GIT_COMMIT" >> lrp.config.yaml; fi; \
 		else \
 			sed -i "s/^fromBatchNumber:.*/fromBatchNumber: $$FROM_BATCH_NO/" lrp.config.yaml; \
 			sed -i "s/^toBatchNumber:.*/toBatchNumber: $$TO_BATCH_NO/" lrp.config.yaml; \
 			sed -i "s/^useExternalDatastream:.*/useExternalDatastream: $$EXTERNAL_DS/" lrp.config.yaml; \
 			sed -i "s/^user:.*/user: $$USER_NAME/" lrp.config.yaml; \
 			sed -i "s/^portDiff:.*/portDiff: $$PORT_DIFF/" lrp.config.yaml; \
+			sed -i "s/^gitCommit:.*/gitCommit: $$GIT_COMMIT/" lrp.config.yaml; \
 			if ! grep -q "^fromBatchNumber:" lrp.config.yaml; then echo "fromBatchNumber: $$FROM_BATCH_NO" >> lrp.config.yaml; fi; \
 			if ! grep -q "^toBatchNumber:" lrp.config.yaml; then echo "toBatchNumber: $$TO_BATCH_NO" >> lrp.config.yaml; fi; \
 			if ! grep -q "^useExternalDatastream:" lrp.config.yaml; then echo "useExternalDatastream: $$EXTERNAL_DS" >> lrp.config.yaml; fi; \
 			if ! grep -q "^user:" lrp.config.yaml; then echo "user: $$USER_NAME" >> lrp.config.yaml; fi; \
 			if ! grep -q "^portDiff:" lrp.config.yaml; then echo "portDiff: $$PORT_DIFF" >> lrp.config.yaml; fi; \
+			if ! grep -q "^gitCommit:" lrp.config.yaml; then echo "gitCommit: $$GIT_COMMIT" >> lrp.config.yaml; fi; \
 		fi; \
 	fi
 
 .PHONY: lrp-config-apply
 lrp-config-apply:
 	@FROM_BATCH_NO=$$(awk '/^fromBatchNumber:/ {print $$2}' lrp.config.yaml); \
+	UNWIND_BATCH_NO=$$((FROM_BATCH_NO - 1)); \
 	TO_BATCH_NO=$$(awk '/^toBatchNumber:/ {print $$2}' lrp.config.yaml); \
 	EXTERNAL_DS=$$(awk '/^useExternalDatastream:/ {print $$2}' lrp.config.yaml); \
-	UNWIND_BATCH_NO=$$((FROM_BATCH_NO - 1)); \
+	if [ "$$EXTERNAL_DS" = "true" ]; then \
+		DS_PATH=$$(awk '/^externalDatastreamPath:/ {print $$2}' lrp.config.yaml); \
+		if [ ! -z "$$DS_PATH" ]; then \
+			EXPANDED_DS_PATH=$$(echo "$$DS_PATH" | envsubst); \
+			if [ "$(shell uname)" = "Darwin" ]; then \
+				sed -i '' "s|- .*:/home/data-stream.bin|- $$EXPANDED_DS_PATH.bin:/home/data-stream.bin|" docker-compose.yml; \
+				sed -i '' "s|- .*:/home/data-stream.db/|- $$EXPANDED_DS_PATH.db:/home/data-stream.db/|" docker-compose.yml; \
+			else \
+				sed -i "s|- .*:/home/data-stream.bin|- $$EXPANDED_DS_PATH.bin:/home/data-stream.bin|" docker-compose.yml; \
+				sed -i "s|- .*:/home/data-stream.db/|- $$EXPANDED_DS_PATH.db:/home/data-stream.db/|" docker-compose.yml; \
+			fi; \
+		fi; \
+	fi; \
 	if [ "$(shell uname)" = "Darwin" ]; then \
 		sed -i '' "s/--unwind-batch-no=[0-9]*/--unwind-batch-no=$$UNWIND_BATCH_NO/" docker-compose.yml; \
 		sed -i '' "s/--zkevm.sequencer-resequence-halt-on-batch-number=[0-9]*/--zkevm.sequencer-resequence-halt-on-batch-number=$$TO_BATCH_NO/" docker-compose.yml; \
