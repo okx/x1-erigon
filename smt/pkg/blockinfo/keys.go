@@ -46,11 +46,11 @@ func KeyTxLogs(txIndex, logIndex *big.Int) (*utils.NodeKey, error) {
 		return nil, errors.New("nil key")
 	}
 
-	txIndexKey := utils.ScalarToArrayBig(txIndex)
-	key1 := utils.NodeValue8{txIndexKey[0], txIndexKey[1], txIndexKey[2], txIndexKey[3], txIndexKey[4], txIndexKey[5], big.NewInt(int64(IndexBlockHeaderLogs)), big.NewInt(0)}
+	txIndexKey := utils.ScalarToArray8(txIndex)
+	key1 := utils.NodeValue8{txIndexKey[0], txIndexKey[1], txIndexKey[2], txIndexKey[3], txIndexKey[4], txIndexKey[5], uint64(IndexBlockHeaderLogs), 0}
 
-	logIndexArray := utils.ScalarToArrayBig(logIndex)
-	lia, err := utils.NodeValue8FromBigIntArray(logIndexArray)
+	logIndexArray := utils.ScalarToArray8(logIndex)
+	lia, err := utils.NodeValue8FromArray(logIndexArray)
 	if err != nil {
 		return nil, err
 	}

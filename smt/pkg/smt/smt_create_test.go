@@ -74,7 +74,7 @@ func TestSMT_Create_Insert(t *testing.T) {
 				t.Errorf("Insert failed: %v", err)
 			}
 
-			hex := fmt.Sprintf("0x%0x", utils.ArrayToScalar(newRoot[:]))
+			hex := fmt.Sprintf("0x%0x", utils.ArrayToScalar64Bit(newRoot[:]))
 			if hex != scenario.expectedRoot {
 				t.Errorf("root hash is not as expected, got %v wanted %v", hex, scenario.expectedRoot)
 			}
@@ -130,7 +130,7 @@ func TestSMT_Create_CompareWithRandomData(t *testing.T) {
 	s2 = nil
 
 	hexExpected := fmt.Sprintf("0x%0x", root1)
-	hexResult := fmt.Sprintf("0x%0x", utils.ArrayToScalar(root2[:]))
+	hexResult := fmt.Sprintf("0x%0x", utils.ArrayToScalar64Bit(root2[:]))
 	if hexExpected != hexResult {
 		t.Errorf("root hash is not as expected, got %v wanted %v", hexExpected, hexResult)
 	}

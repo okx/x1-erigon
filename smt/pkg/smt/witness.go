@@ -82,7 +82,8 @@ func (s *RoSMT) BuildWitness(rd trie.RetainDecider, ctx context.Context) (*trie.
 				return false, err
 			}
 
-			vInBytes := utils.ArrayBigToScalar(utils.BigIntArrayFromNodeValue8(v.GetNodeValue8())).Bytes()
+			arr := v.GetNodeValue8().ToUintArray()
+			vInBytes := utils.ArrayToScalar32Bit(arr[:]).Bytes()
 			if t == utils.SC_CODE {
 				code, err := s.DbRo.GetCode(vInBytes)
 				if err != nil {

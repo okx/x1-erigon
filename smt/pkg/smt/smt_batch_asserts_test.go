@@ -46,21 +46,21 @@ func assertSmtTreeDbStructure(t *testing.T, s *smt.SMT, nodeHash utils.NodeKey, 
 	dbNodeValue, err := s.Db.Get(nodeHash)
 	assert.NilError(t, err)
 
-	nodeHashHex := utils.ConvertBigIntToHex(utils.ArrayToScalar(nodeHash[:]))
+	nodeHashHex := utils.ConvertBigIntToHex(utils.ArrayToScalar64Bit(nodeHash[:]))
 	usedNodeHashesMap[nodeHashHex] = &nodeHash
 
 	if dbNodeValue.IsFinalNode() {
-		nodeValueHash := utils.NodeKeyFromBigIntArray(dbNodeValue[4:8])
+		nodeValueHash := utils.NodeKeyFromArray(dbNodeValue[4:8])
 		dbNodeValue, err = s.Db.Get(nodeValueHash)
 		assert.NilError(t, err)
 
-		nodeHashHex := utils.ConvertBigIntToHex(utils.ArrayToScalar(nodeValueHash[:]))
+		nodeHashHex := utils.ConvertBigIntToHex(utils.ArrayToScalar64Bit(nodeValueHash[:]))
 		usedNodeHashesMap[nodeHashHex] = &nodeValueHash
 		return
 	}
 
-	assertSmtTreeDbStructure(t, s, utils.NodeKeyFromBigIntArray(dbNodeValue[0:4]), usedNodeHashesMap)
-	assertSmtTreeDbStructure(t, s, utils.NodeKeyFromBigIntArray(dbNodeValue[4:8]), usedNodeHashesMap)
+	assertSmtTreeDbStructure(t, s, utils.NodeKeyFromArray(dbNodeValue[0:4]), usedNodeHashesMap)
+	assertSmtTreeDbStructure(t, s, utils.NodeKeyFromArray(dbNodeValue[4:8]), usedNodeHashesMap)
 }
 
 func assertHashToKeyDbStrcture(t *testing.T, smtBatch *smt.SMT, nodeHash utils.NodeKey, testMetadata bool) int {
@@ -77,13 +77,13 @@ func assertHashToKeyDbStrcture(t *testing.T, smtBatch *smt.SMT, nodeHash utils.N
 		nodeKey, err := smtBatch.Db.GetHashKey(nodeHash)
 		assert.NilError(t, err)
 
-		keyConc := utils.ArrayToScalar(nodeHash[:])
+		keyConc := utils.ArrayToScalar64Bit(nodeHash[:])
 		k := utils.ConvertBigIntToHex(keyConc)
 		_, found := memDb.DbHashKey[k]
 		assert.Equal(t, found, true)
 
 		if testMetadata {
-			keyConc = utils.ArrayToScalar(nodeKey[:])
+			keyConc = utils.ArrayToScalar64Bit(nodeKey[:])
 
 			_, found = memDb.DbKeySource[keyConc.String()]
 			assert.Equal(t, found, true)
@@ -91,7 +91,7 @@ func assertHashToKeyDbStrcture(t *testing.T, smtBatch *smt.SMT, nodeHash utils.N
 		return 1
 	}
 
-	return assertHashToKeyDbStrcture(t, smtBatch, utils.NodeKeyFromBigIntArray(dbNodeValue[0:4]), testMetadata) + assertHashToKeyDbStrcture(t, smtBatch, utils.NodeKeyFromBigIntArray(dbNodeValue[4:8]), testMetadata)
+	return assertHashToKeyDbStrcture(t, smtBatch, utils.NodeKeyFromArray(dbNodeValue[0:4]), testMetadata) + assertHashToKeyDbStrcture(t, smtBatch, utils.NodeKeyFromArray(dbNodeValue[4:8]), testMetadata)
 }
 
 func assertTraverse(t *testing.T, s *smt.SMT) {
@@ -106,11 +106,8 @@ func assertTraverse(t *testing.T, s *smt.SMT) {
 				return false, err
 			}
 
-			if v[0] == nil {
-				return false, fmt.Errorf("value is missing in the db")
-			}
-
-			vInBytes := utils.ArrayBigToScalar(utils.BigIntArrayFromNodeValue8(v.GetNodeValue8())).Bytes()
+			arr := v.GetNodeValue8().ToUintArray()
+			vInBytes := utils.ArrayToScalar32Bit(arr[:]).Bytes()
 			if vInBytes == nil {
 				return false, fmt.Errorf("error in converting to bytes")
 			}

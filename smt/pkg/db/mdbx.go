@@ -158,7 +158,7 @@ func (m *EriDb) SetDepth(depth uint8) error {
 }
 
 func (m *EriRoDb) Get(key utils.NodeKey) (utils.NodeValue12, error) {
-	keyConc := utils.ArrayToScalar(key[:])
+	keyConc := utils.ArrayToScalar64Bit(key[:])
 	k := utils.ConvertBigIntToHex(keyConc)
 
 	data, err := m.kvTxRo.GetOne(TableSmt, []byte(k))
@@ -177,15 +177,10 @@ func (m *EriRoDb) Get(key utils.NodeKey) (utils.NodeValue12, error) {
 }
 
 func (m *EriDb) Insert(key utils.NodeKey, value utils.NodeValue12) error {
-	keyConc := utils.ArrayToScalar(key[:])
+	keyConc := utils.ArrayToScalar64Bit(key[:])
 	k := utils.ConvertBigIntToHex(keyConc)
-
-	vals := make([]*big.Int, 12)
-	copy(vals, value[:])
-
-	vConc := utils.ArrayToScalarBig(vals)
+	vConc := utils.ArrayToScalar64Bit(value[:])
 	v := utils.ConvertBigIntToHex(vConc)
-
 	return m.tx.Put(TableSmt, []byte(k), []byte(v))
 }
 
@@ -194,13 +189,13 @@ func (m *EriDb) Delete(key string) error {
 }
 
 func (m *EriDb) DeleteByNodeKey(key utils.NodeKey) error {
-	keyConc := utils.ArrayToScalar(key[:])
+	keyConc := utils.ArrayToScalar64Bit(key[:])
 	k := utils.ConvertBigIntToHex(keyConc)
 	return m.tx.Delete(TableSmt, []byte(k))
 }
 
 func (m *EriRoDb) GetAccountValue(key utils.NodeKey) (utils.NodeValue8, error) {
-	keyConc := utils.ArrayToScalar(key[:])
+	keyConc := utils.ArrayToScalar64Bit(key[:])
 	k := utils.ConvertBigIntToHex(keyConc)
 
 	data, err := m.kvTxRo.GetOne(TableAccountValues, []byte(k))
@@ -219,32 +214,27 @@ func (m *EriRoDb) GetAccountValue(key utils.NodeKey) (utils.NodeValue8, error) {
 }
 
 func (m *EriDb) InsertAccountValue(key utils.NodeKey, value utils.NodeValue8) error {
-	keyConc := utils.ArrayToScalar(key[:])
+	keyConc := utils.ArrayToScalar64Bit(key[:])
 	k := utils.ConvertBigIntToHex(keyConc)
-
-	vals := make([]*big.Int, 8)
-	copy(vals, value[:]) // Replace the loop with the copy function
-
-	vConc := utils.ArrayToScalarBig(vals)
+	vConc := utils.ArrayToScalar64Bit(value[:])
 	v := utils.ConvertBigIntToHex(vConc)
-
 	return m.tx.Put(TableAccountValues, []byte(k), []byte(v))
 }
 
 func (m *EriDb) InsertKeySource(key utils.NodeKey, value []byte) error {
-	keyConc := utils.ArrayToScalar(key[:])
+	keyConc := utils.ArrayToScalar64Bit(key[:])
 
 	return m.tx.Put(TableMetadata, keyConc.Bytes(), value)
 }
 
 func (m *EriDb) DeleteKeySource(key utils.NodeKey) error {
-	keyConc := utils.ArrayToScalar(key[:])
+	keyConc := utils.ArrayToScalar64Bit(key[:])
 
 	return m.tx.Delete(TableMetadata, keyConc.Bytes())
 }
 
 func (m *EriRoDb) GetKeySource(key utils.NodeKey) ([]byte, error) {
-	keyConc := utils.ArrayToScalar(key[:])
+	keyConc := utils.ArrayToScalar64Bit(key[:])
 
 	data, err := m.kvTxRo.GetOne(TableMetadata, keyConc.Bytes())
 	if err != nil {
@@ -259,20 +249,20 @@ func (m *EriRoDb) GetKeySource(key utils.NodeKey) ([]byte, error) {
 }
 
 func (m *EriDb) InsertHashKey(key utils.NodeKey, value utils.NodeKey) error {
-	keyConc := utils.ArrayToScalar(key[:])
+	keyConc := utils.ArrayToScalar64Bit(key[:])
 
-	valConc := utils.ArrayToScalar(value[:])
+	valConc := utils.ArrayToScalar64Bit(value[:])
 
 	return m.tx.Put(TableHashKey, keyConc.Bytes(), valConc.Bytes())
 }
 
 func (m *EriDb) DeleteHashKey(key utils.NodeKey) error {
-	keyConc := utils.ArrayToScalar(key[:])
+	keyConc := utils.ArrayToScalar64Bit(key[:])
 	return m.tx.Delete(TableHashKey, keyConc.Bytes())
 }
 
 func (m *EriRoDb) GetHashKey(key utils.NodeKey) (utils.NodeKey, error) {
-	keyConc := utils.ArrayToScalar(key[:])
+	keyConc := utils.ArrayToScalar64Bit(key[:])
 
 	data, err := m.kvTxRo.GetOne(TableHashKey, keyConc.Bytes())
 	if err != nil {
@@ -285,7 +275,7 @@ func (m *EriRoDb) GetHashKey(key utils.NodeKey) (utils.NodeKey, error) {
 
 	nv := big.NewInt(0).SetBytes(data)
 
-	na := utils.ScalarToArray(nv)
+	na := utils.ScalarToArray4(nv)
 
 	return utils.NodeKey{na[0], na[1], na[2], na[3]}, nil
 }
@@ -341,7 +331,7 @@ func (m *EriRoDb) GetDb() map[string][]string {
 
 		allFirst8PaddedWithZeros := true
 		for i := 0; i < 8; i++ {
-			if !strings.HasPrefix(fmt.Sprintf("%016s", val[i].Text(16)), "00000000") {
+			if !strings.HasPrefix(fmt.Sprintf("%016x", val[i]), "00000000") {
 				allFirst8PaddedWithZeros = false
 				break
 			}
@@ -354,7 +344,7 @@ func (m *EriRoDb) GetDb() map[string][]string {
 		outputArr := make([]string, truncationLength)
 		for i := 0; i < truncationLength; i++ {
 			if i < len(val) {
-				outputArr[i] = fmt.Sprintf("%016s", val[i].Text(16))
+				outputArr[i] = fmt.Sprintf("%016x", val[i])
 			} else {
 				outputArr[i] = "0000000000000000"
 			}

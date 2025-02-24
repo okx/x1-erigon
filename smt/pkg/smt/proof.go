@@ -62,8 +62,8 @@ func BuildProofs(s *RoSMT, rd trie.RetainDecider, ctx context.Context) ([]*SMTPr
 		}
 
 		nodeBytes := make([]byte, 64)
-		utils.ArrayToScalar(v.Get0to4()[:]).FillBytes(nodeBytes[:32])
-		utils.ArrayToScalar(v.Get4to8()[:]).FillBytes(nodeBytes[32:])
+		utils.ArrayToScalar64Bit(v.Get0to4()[:]).FillBytes(nodeBytes[:32])
+		utils.ArrayToScalar64Bit(v.Get4to8()[:]).FillBytes(nodeBytes[32:])
 
 		if v.IsFinalNode() {
 			nodeBytes = append(nodeBytes, 1)
@@ -81,7 +81,8 @@ func BuildProofs(s *RoSMT, rd trie.RetainDecider, ctx context.Context) ([]*SMTPr
 				return false, err
 			}
 
-			vInBytes := utils.ArrayBigToScalar(utils.BigIntArrayFromNodeValue8(v.GetNodeValue8())).Bytes()
+			arr := v.GetNodeValue8().ToUintArray()
+			vInBytes := utils.ArrayToScalar32Bit(arr[:]).Bytes()
 
 			proofs = append(proofs, &SMTProofElement{
 				Path:  prefix,
@@ -138,8 +139,8 @@ func VerifyAndGetVal(stateRoot utils.NodeKey, proof []hexutility.Bytes, key util
 			capacity = utils.LeafCapacity
 		}
 
-		leftChild := utils.ScalarToArray(big.NewInt(0).SetBytes(proof[i][:32]))
-		rightChild := utils.ScalarToArray(big.NewInt(0).SetBytes(proof[i][32:64]))
+		leftChild := utils.ScalarToArray4(big.NewInt(0).SetBytes(proof[i][:32]))
+		rightChild := utils.ScalarToArray4(big.NewInt(0).SetBytes(proof[i][32:64]))
 
 		leftChildNode := [4]uint64{leftChild[0], leftChild[1], leftChild[2], leftChild[3]}
 		rightChildNode := [4]uint64{rightChild[0], rightChild[1], rightChild[2], rightChild[3]}
@@ -179,8 +180,8 @@ func VerifyAndGetVal(stateRoot utils.NodeKey, proof []hexutility.Bytes, key util
 	}
 
 	v := new(big.Int).SetBytes(proof[len(proof)-1])
-	x := utils.ScalarToArrayBig(v)
-	nodeValue, err := utils.NodeValue8FromBigIntArray(x)
+	x := utils.ScalarToArray8(v)
+	nodeValue, err := utils.NodeValue8FromArray(x)
 	if err != nil {
 		return nil, err
 	}

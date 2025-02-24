@@ -65,7 +65,7 @@ func TestVerifyAndGetVal(t *testing.T) {
 
 	contractAddress := libcommon.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
 	a := utils.ConvertHexToBigInt(contractAddress.String())
-	address := utils.ScalarToArrayBig(a)
+	address := utils.ScalarToArray8(a)
 
 	smtRoot, _ := smtTrie.RoSMT.DbRo.GetLastRoot()
 	if err != nil {

@@ -81,13 +81,13 @@ func (m *MemDb) Get(key utils.NodeKey) (utils.NodeValue12, error) {
 	m.lock.RLock()         // Lock for reading
 	defer m.lock.RUnlock() // Make sure to unlock when done
 
-	keyConc := utils.ArrayToScalar(key[:])
+	keyConc := utils.ArrayToScalar64Bit(key[:])
 
 	k := utils.ConvertBigIntToHex(keyConc)
 
 	values := utils.NodeValue12{}
 	for i, v := range m.Db[k] {
-		values[i] = utils.ConvertHexToBigInt(v)
+		values[i] = utils.ConvertHexToUint64(v)
 	}
 
 	return values, nil
@@ -97,12 +97,12 @@ func (m *MemDb) Insert(key utils.NodeKey, value utils.NodeValue12) error {
 	m.lock.Lock()         // Lock for writing
 	defer m.lock.Unlock() // Make sure to unlock when done
 
-	keyConc := utils.ArrayToScalar(key[:])
+	keyConc := utils.ArrayToScalar64Bit(key[:])
 	k := utils.ConvertBigIntToHex(keyConc)
 
 	values := make([]string, 12)
 	for i, v := range value {
-		values[i] = utils.ConvertBigIntToHex(v)
+		values[i] = utils.ConvertUint64ToHex(v)
 	}
 
 	m.Db[k] = values
@@ -121,7 +121,7 @@ func (m *MemDb) DeleteByNodeKey(key utils.NodeKey) error {
 	m.lock.Lock()         // Lock for writing
 	defer m.lock.Unlock() // Make sure to unlock when done
 
-	keyConc := utils.ArrayToScalar(key[:])
+	keyConc := utils.ArrayToScalar64Bit(key[:])
 	k := utils.ConvertBigIntToHex(keyConc)
 	delete(m.Db, k)
 	return nil
@@ -131,13 +131,13 @@ func (m *MemDb) GetAccountValue(key utils.NodeKey) (utils.NodeValue8, error) {
 	m.lock.RLock()         // Lock for reading
 	defer m.lock.RUnlock() // Make sure to unlock when done
 
-	keyConc := utils.ArrayToScalar(key[:])
+	keyConc := utils.ArrayToScalar64Bit(key[:])
 
 	k := utils.ConvertBigIntToHex(keyConc)
 
 	values := utils.NodeValue8{}
 	for i, v := range m.DbAccVal[k] {
-		values[i] = utils.ConvertHexToBigInt(v)
+		values[i] = utils.ConvertHexToUint64(v)
 	}
 
 	return values, nil
@@ -147,12 +147,12 @@ func (m *MemDb) InsertAccountValue(key utils.NodeKey, value utils.NodeValue8) er
 	m.lock.Lock()         // Lock for writing
 	defer m.lock.Unlock() // Make sure to unlock when done
 
-	keyConc := utils.ArrayToScalar(key[:])
+	keyConc := utils.ArrayToScalar64Bit(key[:])
 	k := utils.ConvertBigIntToHex(keyConc)
 
 	values := make([]string, 8)
 	for i, v := range value {
-		values[i] = utils.ConvertBigIntToHex(v)
+		values[i] = utils.ConvertUint64ToHex(v)
 	}
 
 	m.DbAccVal[k] = values
@@ -163,7 +163,7 @@ func (m *MemDb) InsertKeySource(key utils.NodeKey, value []byte) error {
 	m.lock.Lock()         // Lock for writing
 	defer m.lock.Unlock() // Make sure to unlock when done
 
-	keyConc := utils.ArrayToScalar(key[:])
+	keyConc := utils.ArrayToScalar64Bit(key[:])
 
 	m.DbKeySource[keyConc.String()] = value
 	return nil
@@ -173,7 +173,7 @@ func (m *MemDb) DeleteKeySource(key utils.NodeKey) error {
 	m.lock.Lock()         // Lock for writing
 	defer m.lock.Unlock() // Make sure to unlock when done
 
-	keyConc := utils.ArrayToScalar(key[:])
+	keyConc := utils.ArrayToScalar64Bit(key[:])
 
 	delete(m.DbKeySource, keyConc.String())
 	return nil
@@ -183,7 +183,7 @@ func (m *MemDb) GetKeySource(key utils.NodeKey) ([]byte, error) {
 	m.lock.RLock()         // Lock for reading
 	defer m.lock.RUnlock() // Make sure to unlock when done
 
-	keyConc := utils.ArrayToScalar(key[:])
+	keyConc := utils.ArrayToScalar64Bit(key[:])
 
 	s, ok := m.DbKeySource[keyConc.String()]
 
@@ -198,10 +198,10 @@ func (m *MemDb) InsertHashKey(key utils.NodeKey, value utils.NodeKey) error {
 	m.lock.Lock()         // Lock for writing
 	defer m.lock.Unlock() // Make sure to unlock when done
 
-	keyConc := utils.ArrayToScalar(key[:])
+	keyConc := utils.ArrayToScalar64Bit(key[:])
 	k := utils.ConvertBigIntToHex(keyConc)
 
-	valConc := utils.ArrayToScalar(value[:])
+	valConc := utils.ArrayToScalar64Bit(value[:])
 
 	m.DbHashKey[k] = valConc.Bytes()
 	return nil
@@ -211,7 +211,7 @@ func (m *MemDb) DeleteHashKey(key utils.NodeKey) error {
 	m.lock.Lock()         // Lock for writing
 	defer m.lock.Unlock() // Make sure to unlock when done
 
-	keyConc := utils.ArrayToScalar(key[:])
+	keyConc := utils.ArrayToScalar64Bit(key[:])
 	k := utils.ConvertBigIntToHex(keyConc)
 
 	delete(m.DbHashKey, k)
@@ -222,7 +222,7 @@ func (m *MemDb) GetHashKey(key utils.NodeKey) (utils.NodeKey, error) {
 	m.lock.RLock()         // Lock for reading
 	defer m.lock.RUnlock() // Make sure to unlock when done
 
-	keyConc := utils.ArrayToScalar(key[:])
+	keyConc := utils.ArrayToScalar64Bit(key[:])
 	k := utils.ConvertBigIntToHex(keyConc)
 
 	s, ok := m.DbHashKey[k]
@@ -233,7 +233,7 @@ func (m *MemDb) GetHashKey(key utils.NodeKey) (utils.NodeKey, error) {
 
 	nv := big.NewInt(0).SetBytes(s)
 
-	na := utils.ScalarToArray(nv)
+	na := utils.ScalarToArray4(nv)
 
 	return utils.NodeKey{na[0], na[1], na[2], na[3]}, nil
 }

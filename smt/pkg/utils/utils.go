@@ -26,8 +26,8 @@ const (
 	BYTECODE_BYTES_ELEMENT   = 7
 )
 
-type NodeValue8 [8]*big.Int
-type NodeValue12 [12]*big.Int
+type NodeValue8 [8]uint64
+type NodeValue12 [12]uint64
 type NodeKey [4]uint64
 
 type NodeType int
@@ -71,7 +71,7 @@ func (nk *NodeKey) IsEqualTo(nk2 NodeKey) bool {
 }
 
 func (nk *NodeKey) ToBigInt() *big.Int {
-	return ArrayToScalar(nk[:])
+	return ArrayToScalar64Bit(nk[:])
 }
 
 func (nk *NodeKey) AsUint64Pointer() *[4]uint64 {
@@ -84,7 +84,7 @@ func (nv *NodeValue8) IsZero() bool {
 	}
 
 	for i := 0; i < 8; i++ {
-		if nv[i] == nil || nv[i].Uint64() != 0 {
+		if nv[i] != 0 {
 			return false
 		}
 	}
@@ -99,63 +99,36 @@ func (nv *NodeValue8) SetHalfValue(values [4]uint64, part int) error {
 	}
 
 	partI := part * 4
-	for i, v := range values {
-		nlh := big.Int{}
-		nlh.SetUint64(v)
-		nv[i+partI] = &nlh
-	}
+	copy(nv[partI:partI+4], values[:])
 
 	return nil
 }
 
 func (nv *NodeValue8) ToUintArray() [8]uint64 {
-	var result [8]uint64
-
-	if nv != nil {
-		for i := 0; i < 8; i++ {
-			if nv[i] != nil {
-				result[i] = nv[i].Uint64()
-			}
-			// if nv[i] is nil, result[i] will remain as its zero value (0)
-		}
-	}
-	// if nv is nil, result will be an array of 8 zeros
-
-	return result
+	return *nv
 }
 
 func (nv *NodeValue8) ToUintArrayByPointer() *[8]uint64 {
-	var result [8]uint64
-
-	if nv != nil {
-		for i := 0; i < 8; i++ {
-			if nv[i] != nil {
-				result[i] = nv[i].Uint64()
-			}
-			// if nv[i] is nil, result[i] will remain as its zero value (0)
-		}
-	}
-	// if nv is nil, result will be an array of 8 zeros
-
+	result := nv.ToUintArray()
 	return &result
 }
 
 func (nv *NodeValue12) ToBigInt() *big.Int {
-	return ArrayToScalarBig(nv[:])
+	return ArrayToScalar64Bit(nv[:])
 }
 
 func (nv *NodeValue12) StripCapacity() [8]uint64 {
-	return [8]uint64{nv[0].Uint64(), nv[1].Uint64(), nv[2].Uint64(), nv[3].Uint64(), nv[4].Uint64(), nv[5].Uint64(), nv[6].Uint64(), nv[7].Uint64()}
+	return [8]uint64{nv[0], nv[1], nv[2], nv[3], nv[4], nv[5], nv[6], nv[7]}
 }
 
 func (nv *NodeValue12) Get0to4() *NodeKey {
 	// slice it 0-4
-	return &NodeKey{nv[0].Uint64(), nv[1].Uint64(), nv[2].Uint64(), nv[3].Uint64()}
+	return &NodeKey{nv[0], nv[1], nv[2], nv[3]}
 }
 
 func (nv *NodeValue12) Get4to8() *NodeKey {
 	// slice it 4-8
-	return &NodeKey{nv[4].Uint64(), nv[5].Uint64(), nv[6].Uint64(), nv[7].Uint64()}
+	return &NodeKey{nv[4], nv[5], nv[6], nv[7]}
 }
 
 func (nv *NodeValue12) GetNodeValue8() *NodeValue8 {
@@ -164,7 +137,7 @@ func (nv *NodeValue12) GetNodeValue8() *NodeValue8 {
 
 func (nv *NodeValue12) Get0to8() [8]uint64 {
 	// slice it from 0-8
-	return [8]uint64{nv[0].Uint64(), nv[1].Uint64(), nv[2].Uint64(), nv[3].Uint64(), nv[4].Uint64(), nv[5].Uint64(), nv[6].Uint64(), nv[7].Uint64()}
+	return [8]uint64{nv[0], nv[1], nv[2], nv[3], nv[4], nv[5], nv[6], nv[7]}
 }
 
 func (nv *NodeValue12) IsUniqueSibling() (int, error) {
@@ -173,7 +146,7 @@ func (nv *NodeValue12) IsUniqueSibling() (int, error) {
 	a := nv[:]
 
 	for i := 0; i < len(a); i += 4 {
-		k := NodeKeyFromBigIntArray(a[i : i+4])
+		k := NodeKeyFromArray(a[i : i+4])
 		if !k.IsZero() {
 			count++
 			fnd = i / 4
@@ -185,15 +158,9 @@ func (nv *NodeValue12) IsUniqueSibling() (int, error) {
 	return -1, nil
 }
 
-func NodeKeyFromBigIntArray(arr []*big.Int) NodeKey {
+func NodeKeyFromArray(arr []uint64) NodeKey {
 	nk := NodeKey{}
-	for i, v := range arr {
-		if v != nil {
-			nk[i] = v.Uint64()
-		} else {
-			nk[i] = 0
-		}
-	}
+	copy(nk[:], arr)
 	return nk
 }
 
@@ -207,13 +174,13 @@ func IsArrayUint64Empty(arr []uint64) bool {
 	return true
 }
 
-func Value8FromBigIntArray(arr []*big.Int) NodeValue8 {
-	nv := [8]*big.Int{}
+func Value8FromBigIntArray(arr []uint64) NodeValue8 {
+	nv := NodeValue8{}
 	copy(nv[:], arr)
 	return nv
 }
 
-func NodeValue12FromBigIntArray(arr []*big.Int) (*NodeValue12, error) {
+func NodeValue12FromBigIntArray(arr []uint64) (*NodeValue12, error) {
 	if len(arr) != 12 {
 		return &NodeValue12{}, fmt.Errorf("invalid array length")
 	}
@@ -223,16 +190,16 @@ func NodeValue12FromBigIntArray(arr []*big.Int) (*NodeValue12, error) {
 }
 
 func NodeValue8FromBigInt(value *big.Int) (*NodeValue8, error) {
-	x := ScalarToArrayBig(value)
-	return NodeValue8FromBigIntArray(x)
+	arr := ScalarToArray8(value)
+	return NodeValue8FromArray(arr)
 }
 
 func NodeValue8ToBigInt(value *NodeValue8) *big.Int {
-	x := BigIntArrayFromNodeValue8(value)
-	return ArrayBigToScalar(x)
+	arr := value.ToUintArray()
+	return ArrayToScalar32Bit(arr[:])
 }
 
-func NodeValue8FromBigIntArray(arr []*big.Int) (*NodeValue8, error) {
+func NodeValue8FromArray(arr []uint64) (*NodeValue8, error) {
 	if len(arr) != 8 {
 		return &NodeValue8{}, fmt.Errorf("invalid array length")
 	}
@@ -241,32 +208,32 @@ func NodeValue8FromBigIntArray(arr []*big.Int) (*NodeValue8, error) {
 	return &nv, nil
 }
 
-func BigIntArrayFromNodeValue8(nv *NodeValue8) []*big.Int {
-	arr := make([]*big.Int, 8)
-
-	copy(arr, nv[:])
-
-	return arr
-}
-
 func (nv *NodeValue12) IsZero() bool {
-	zero := false
 	for _, v := range nv {
-		if v.Cmp(big.NewInt(0)) == 0 {
-			zero = true
-		} else {
-			zero = false
-			break
+		if v != 0 {
+			return false
 		}
 	}
-	return zero
+	return true
 }
 
 func (nv *NodeValue12) IsFinalNode() bool {
-	if nv[8] == nil {
+	if nv[8] == 0 {
 		return false
 	}
-	return nv[8].Cmp(big.NewInt(1)) == 0
+	return nv[8] == 1
+}
+
+func ConvertHexToUint64(hex string) uint64 {
+	n, err := strconv.ParseUint(hex, 16, 64)
+	if err != nil {
+		panic(err)
+	}
+	return n
+}
+
+func ConvertUint64ToHex(n uint64) string {
+	return fmt.Sprintf("%x", n)
 }
 
 // 7 times more efficient than sprintf
@@ -285,16 +252,7 @@ func ConvertHexToAddress(hex string) common.Address {
 	return common.BigToAddress(bigInt)
 }
 
-func ArrayToScalar(array []uint64) *big.Int {
-	scalar := new(big.Int)
-	for i := len(array) - 1; i >= 0; i-- {
-		scalar.Lsh(scalar, 64)
-		scalar.Add(scalar, new(big.Int).SetUint64(array[i]))
-	}
-	return scalar
-}
-
-func ScalarToArray(scalar *big.Int) []uint64 {
+func ScalarToArray4(scalar *big.Int) []uint64 {
 	scalar = new(big.Int).Set(scalar)
 	mask := new(big.Int)
 	mask.SetString("FFFFFFFFFFFFFFFF", 16)
@@ -313,11 +271,11 @@ func ScalarToArray(scalar *big.Int) []uint64 {
 	return []uint64{r0.Uint64(), r1.Uint64(), r2.Uint64(), r3.Uint64()}
 }
 
-func ArrayToScalarBig(array []*big.Int) *big.Int {
+func ArrayToScalar64Bit(array []uint64) *big.Int {
 	scalar := new(big.Int)
 	for i := len(array) - 1; i >= 0; i-- {
 		scalar.Lsh(scalar, 64)
-		scalar.Add(scalar, array[i])
+		scalar.Add(scalar, big.NewInt(0).SetUint64(array[i]))
 	}
 	return scalar
 }
@@ -366,26 +324,26 @@ func ScalarToRoot(s *big.Int) NodeKey {
 }
 
 func ScalarToNodeValue(scalarIn *big.Int) NodeValue12 {
-	out := [12]*big.Int{}
+	out := [12]uint64{}
 	mask := new(big.Int).SetBytes([]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff})
 	scalar := new(big.Int).Set(scalarIn)
 
 	for i := 0; i < 12; i++ {
 		value := new(big.Int).And(scalar, mask)
-		out[i] = value
+		out[i] = value.Uint64()
 		scalar.Rsh(scalar, 64)
 	}
 	return out
 }
 
 func ScalarToNodeValue8(scalarIn *big.Int) NodeValue8 {
-	out := [8]*big.Int{}
+	out := [8]uint64{}
 	mask := new(big.Int).SetBytes([]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff})
 	scalar := new(big.Int).Set(scalarIn)
 
 	for i := 0; i < 8; i++ {
 		value := new(big.Int).And(scalar, mask)
-		out[i] = value
+		out[i] = value.Uint64()
 		scalar.Rsh(scalar, 64)
 	}
 	return out
@@ -446,13 +404,8 @@ func ConcatArrays4ByPointers(a, b *[4]uint64) *[8]uint64 {
 
 func ConcatArrays8AndCapacityByPointers(in *[8]uint64, capacity *[4]uint64) *NodeValue12 {
 	v := NodeValue12{}
-	for i, val := range in {
-		v[i] = new(big.Int).SetUint64(val)
-	}
-	for i, val := range capacity {
-		v[i+8] = new(big.Int).SetUint64(val)
-	}
-
+	copy(v[:], in[:])
+	copy(v[8:], capacity[:])
 	return &v
 }
 
@@ -476,83 +429,87 @@ func RemoveKeyBits(k NodeKey, nBits int) NodeKey {
 	return auxk
 }
 
-func ScalarToArrayBig12(scalar *big.Int) []*big.Int {
+func ScalarToArray12(scalar *big.Int) []uint64 {
 	scalar = new(big.Int).Set(scalar)
 	mask := new(big.Int)
 	mask.SetString("FFFFFFFF", 16)
 
-	r0 := new(big.Int).And(scalar, mask)
+	res := make([]uint64, 12)
+
+	res[0] = new(big.Int).And(scalar, mask).Uint64()
 
 	r1 := new(big.Int).Rsh(scalar, 32)
-	r1 = new(big.Int).And(r1, mask)
+	res[1] = new(big.Int).And(r1, mask).Uint64()
 
 	r2 := new(big.Int).Rsh(scalar, 64)
-	r2 = new(big.Int).And(r2, mask)
+	res[2] = new(big.Int).And(r2, mask).Uint64()
 
 	r3 := new(big.Int).Rsh(scalar, 96)
-	r3 = new(big.Int).And(r3, mask)
+	res[3] = new(big.Int).And(r3, mask).Uint64()
 
 	r4 := new(big.Int).Rsh(scalar, 128)
-	r4 = new(big.Int).And(r4, mask)
+	res[4] = new(big.Int).And(r4, mask).Uint64()
 
 	r5 := new(big.Int).Rsh(scalar, 160)
-	r5 = new(big.Int).And(r5, mask)
+	res[5] = new(big.Int).And(r5, mask).Uint64()
 
 	r6 := new(big.Int).Rsh(scalar, 192)
-	r6 = new(big.Int).And(r6, mask)
+	res[6] = new(big.Int).And(r6, mask).Uint64()
 
 	r7 := new(big.Int).Rsh(scalar, 224)
-	r7 = new(big.Int).And(r7, mask)
+	res[7] = new(big.Int).And(r7, mask).Uint64()
 
 	r8 := new(big.Int).Rsh(scalar, 256)
-	r8 = new(big.Int).And(r8, mask)
+	res[8] = new(big.Int).And(r8, mask).Uint64()
 
 	r9 := new(big.Int).Rsh(scalar, 288)
-	r9 = new(big.Int).And(r9, mask)
+	res[9] = new(big.Int).And(r9, mask).Uint64()
 
 	r10 := new(big.Int).Rsh(scalar, 320)
-	r10 = new(big.Int).And(r10, mask)
+	res[10] = new(big.Int).And(r10, mask).Uint64()
 
 	r11 := new(big.Int).Rsh(scalar, 352)
-	r11 = new(big.Int).And(r11, mask)
+	res[11] = new(big.Int).And(r11, mask).Uint64()
 
-	return []*big.Int{r0, r1, r2, r3, r4, r5, r6, r7, r8, r9, r10, r11}
+	return res
 }
 
 var mask = big.NewInt(4294967295)
 
-func ScalarToArrayBig(scalar *big.Int) []*big.Int {
-	r0 := new(big.Int).And(scalar, mask)
+func ScalarToArray8(scalar *big.Int) []uint64 {
+	res := make([]uint64, 8)
+
+	res[0] = new(big.Int).And(scalar, mask).Uint64()
 
 	r1 := new(big.Int).Rsh(scalar, 32)
-	r1.And(r1, mask)
+	res[1] = r1.And(r1, mask).Uint64()
 
 	r2 := new(big.Int).Rsh(scalar, 64)
-	r2.And(r2, mask)
+	res[2] = r2.And(r2, mask).Uint64()
 
 	r3 := new(big.Int).Rsh(scalar, 96)
-	r3.And(r3, mask)
+	res[3] = r3.And(r3, mask).Uint64()
 
 	r4 := new(big.Int).Rsh(scalar, 128)
-	r4.And(r4, mask)
+	res[4] = r4.And(r4, mask).Uint64()
 
 	r5 := new(big.Int).Rsh(scalar, 160)
-	r5.And(r5, mask)
+	res[5] = r5.And(r5, mask).Uint64()
 
 	r6 := new(big.Int).Rsh(scalar, 192)
-	r6.And(r6, mask)
+	res[6] = r6.And(r6, mask).Uint64()
 
 	r7 := new(big.Int).Rsh(scalar, 224)
-	r7.And(r7, mask)
+	res[7] = r7.And(r7, mask).Uint64()
 
-	return []*big.Int{r0, r1, r2, r3, r4, r5, r6, r7}
+	return res
 }
 
-func ArrayBigToScalar(arr []*big.Int) *big.Int {
+func ArrayToScalar32Bit(arr []uint64) *big.Int {
 	scalar := new(big.Int)
 	for i := len(arr) - 1; i >= 0; i-- {
 		scalar.Lsh(scalar, 32)
-		scalar.Add(scalar, arr[i])
+		scalar.Add(scalar, big.NewInt(0).SetUint64(arr[i]))
 	}
 	return scalar
 }
@@ -624,9 +581,9 @@ func KeyContractLength(ethAddr string) NodeKey {
 
 func Key(ethAddr string, c int) NodeKey {
 	a := ConvertHexToBigInt(ethAddr)
-	add := ScalarToArrayBig(a)
+	add := ScalarToArray12(a)
 
-	key1 := NodeValue8{add[0], add[1], add[2], add[3], add[4], add[5], big.NewInt(int64(c)), big.NewInt(0)}
+	key1 := NodeValue8{add[0], add[1], add[2], add[3], add[4], add[5], uint64(c), 0}
 	key1Capacity, err := StringToH4(HASH_POSEIDON_ALL_ZEROES)
 	if err != nil {
 		return NodeKey{}
@@ -639,9 +596,9 @@ func KeyBig(k *big.Int, c int) (*NodeKey, error) {
 	if k == nil {
 		return nil, errors.New("nil key")
 	}
-	add := ScalarToArrayBig(k)
+	add := ScalarToArray8(k)
 
-	key1 := NodeValue8{add[0], add[1], add[2], add[3], add[4], add[5], big.NewInt(int64(c)), big.NewInt(0)}
+	key1 := NodeValue8{add[0], add[1], add[2], add[3], add[4], add[5], uint64(c), 0}
 	key1Capacity, err := StringToH4(HASH_POSEIDON_ALL_ZEROES)
 	if err != nil {
 		return nil, err
@@ -659,16 +616,16 @@ func StrValToBigInt(v string) (*big.Int, bool) {
 	return new(big.Int).SetString(v, 10)
 }
 
-func KeyContractStorage(ethAddr []*big.Int, storagePosition string) NodeKey {
+func KeyContractStorage(ethAddr []uint64, storagePosition string) NodeKey {
 	sp, _ := StrValToBigInt(storagePosition)
-	spArray, err := NodeValue8FromBigIntArray(ScalarToArrayBig(sp))
+	spArray, err := NodeValue8FromArray(ScalarToArray8(sp))
 	if err != nil {
 		return NodeKey{}
 	}
 
 	hk0 := Hash(spArray.ToUintArray(), [4]uint64{0, 0, 0, 0})
 
-	key1 := NodeValue8{ethAddr[0], ethAddr[1], ethAddr[2], ethAddr[3], ethAddr[4], ethAddr[5], big.NewInt(int64(SC_STORAGE)), big.NewInt(0)}
+	key1 := NodeValue8{ethAddr[0], ethAddr[1], ethAddr[2], ethAddr[3], ethAddr[4], ethAddr[5], uint64(SC_STORAGE), 0}
 
 	return Hash(key1.ToUintArray(), hk0)
 }
@@ -743,7 +700,7 @@ func HashContractBytecodeBigIntV1(bc string) *big.Int {
 		tmpHash = Hash(in, capacity)
 	}
 
-	return ArrayToScalar(tmpHash[:])
+	return ArrayToScalar64Bit(tmpHash[:])
 }
 
 func charToDigit(c byte) int {
@@ -826,7 +783,7 @@ func HashContractBytecodeBigInt(bc string) *big.Int {
 		tmpHash = Hash(in, capacity)
 	}
 
-	return ArrayToScalar(tmpHash[:])
+	return ArrayToScalar64Bit(tmpHash[:])
 }
 
 func ResizeHashTo32BytesByPrefixingWithZeroes(hashValue []byte) []byte {
@@ -838,14 +795,6 @@ func ResizeHashTo32BytesByPrefixingWithZeroes(hashValue []byte) []byte {
 	}
 
 	return hashValue
-}
-
-func binaryStringToUint64(binary string) (uint64, error) {
-	num, err := strconv.ParseUint(binary, 2, 64)
-	if err != nil {
-		return 0, err
-	}
-	return num, nil
 }
 
 func SortNodeKeysBitwiseAsc(keys []NodeKey) {

@@ -491,14 +491,14 @@ func insertContractBytecodeToKV(db smt.DB, keys []utils.NodeKey, ethAddr string,
 
 	bytecodeLength := len(parsedBytecode) / 2
 
-	x := utils.ScalarToArrayBig(bi)
-	valueContractCode, err := utils.NodeValue8FromBigIntArray(x)
+	x := utils.ScalarToArray8(bi)
+	valueContractCode, err := utils.NodeValue8FromArray(x)
 	if err != nil {
 		return []utils.NodeKey{}, err
 	}
 
-	x = utils.ScalarToArrayBig(big.NewInt(int64(bytecodeLength)))
-	valueContractLength, err := utils.NodeValue8FromBigIntArray(x)
+	x = utils.ScalarToArray8(big.NewInt(int64(bytecodeLength)))
+	valueContractLength, err := utils.NodeValue8FromArray(x)
 	if err != nil {
 		return []utils.NodeKey{}, err
 	}
@@ -523,7 +523,7 @@ func insertContractBytecodeToKV(db smt.DB, keys []utils.NodeKey, ethAddr string,
 
 func insertContractStorageToKV(db smt.DB, keys []utils.NodeKey, ethAddr string, storage map[string]string) ([]utils.NodeKey, error) {
 	a := utils.ConvertHexToBigInt(ethAddr)
-	add := utils.ScalarToArrayBig(a)
+	add := utils.ScalarToArray8(a)
 
 	for k, v := range storage {
 		if v == "" {
@@ -540,8 +540,8 @@ func insertContractStorageToKV(db smt.DB, keys []utils.NodeKey, ethAddr string, 
 
 		val, _ := new(big.Int).SetString(v, base)
 
-		x := utils.ScalarToArrayBig(val)
-		parsedValue, err := utils.NodeValue8FromBigIntArray(x)
+		x := utils.ScalarToArray8(val)
+		parsedValue, err := utils.NodeValue8FromArray(x)
 		if err != nil {
 			return []utils.NodeKey{}, err
 		}
@@ -563,14 +563,14 @@ func insertAccountStateToKV(db smt.DB, keys []utils.NodeKey, ethAddr string, bal
 	keyBalance := utils.KeyEthAddrBalance(ethAddr)
 	keyNonce := utils.KeyEthAddrNonce(ethAddr)
 
-	x := utils.ScalarToArrayBig(balance)
-	valueBalance, err := utils.NodeValue8FromBigIntArray(x)
+	x := utils.ScalarToArray8(balance)
+	valueBalance, err := utils.NodeValue8FromArray(x)
 	if err != nil {
 		return []utils.NodeKey{}, err
 	}
 
-	x = utils.ScalarToArrayBig(nonce)
-	valueNonce, err := utils.NodeValue8FromBigIntArray(x)
+	x = utils.ScalarToArray8(nonce)
+	valueNonce, err := utils.NodeValue8FromArray(x)
 	if err != nil {
 		return []utils.NodeKey{}, err
 	}

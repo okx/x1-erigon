@@ -11,8 +11,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/log/v3"
 	zktypes "github.com/ledgerwatch/erigon/zk/types"
+	"github.com/ledgerwatch/log/v3"
 
 	"math"
 
@@ -1784,7 +1784,7 @@ func (zkapi *ZkEvmAPIImpl) GetProof(ctx context.Context, address common.Address,
 		StorageProof:    make([]accounts.SMTStorageProofResult, 0),
 	}
 
-	addressArrayBig := smtUtils.ScalarToArrayBig(smtUtils.ConvertHexToBigInt(address.String()))
+	addressArrayBig := smtUtils.ScalarToArray8(smtUtils.ConvertHexToBigInt(address.String()))
 	for _, k := range storageKeys {
 		storageKey := smtUtils.KeyContractStorage(addressArrayBig, k.String())
 		storageProofs := smt.FilterProofs(proofs, storageKey)

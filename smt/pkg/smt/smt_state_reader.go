@@ -140,7 +140,7 @@ func (s *SMT) getValue(key int, address libcommon.Address, storageKey *libcommon
 		kn = utils.Key(address.String(), key)
 	} else {
 		a := utils.ConvertHexToBigInt(address.String())
-		add := utils.ScalarToArrayBig(a)
+		add := utils.ScalarToArray8(a)
 
 		kn = utils.KeyContractStorage(add, storageKey.String())
 	}
@@ -170,7 +170,8 @@ func (s *SMT) getValueInBytes(nodeKey utils.NodeKey) ([]byte, error) {
 			if err != nil {
 				return false, err
 			}
-			vInBytes := utils.ArrayBigToScalar(utils.BigIntArrayFromNodeValue8(v.GetNodeValue8())).Bytes()
+			arr := v.GetNodeValue8().ToUintArray()
+			vInBytes := utils.ArrayToScalar32Bit(arr[:]).Bytes()
 
 			value = vInBytes
 			return false, nil

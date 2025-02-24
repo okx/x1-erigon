@@ -269,8 +269,8 @@ func generateL1BlockHash(blockHash *common.Hash) (key *utils.NodeKey, value *uti
 }
 
 func bigInt2NodeVal8(val *big.Int) (*utils.NodeValue8, error) {
-	x := utils.ScalarToArrayBig(val)
-	v, err := utils.NodeValue8FromBigIntArray(x)
+	x := utils.ScalarToArray8(val)
+	v, err := utils.NodeValue8FromArray(x)
 	if err != nil {
 		return nil, err
 	}
