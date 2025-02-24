@@ -1,0 +1,22 @@
+# 简化后的 proxyd.toml
+
+[server]
+rpc_port = 8080  
+log_level = "info"
+
+
+[backend]
+response_timeout_seconds = 5 
+max_retries = 3 
+
+[backends]
+  [backends.mybackend] 
+  rpc_url = "http://localhost:8124" 
+
+[backend_groups]
+  [backend_groups.main] 
+  backends = ["mybackend"] 
+
+[rpc_method_mappings]
+eth_call = "main" 
+eth_chainId = "main" 

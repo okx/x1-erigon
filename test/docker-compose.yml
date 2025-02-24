@@ -395,3 +395,9 @@ services:
     command: >
       cdk-erigon --http.vhosts=* --http.corsdomain=* --ws --config=/usr/src/app/config.yaml
 
+  proxyd:
+    image: liudisteven/proxyd:1.0
+    ports:
+      - "8080:8080"
+    volumes:
+    - ./config/proxyd.toml:/etc/proxyd/proxyd.toml
