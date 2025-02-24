@@ -1,0 +1,112 @@
+[server]
+# Host for the proxyd RPC server to listen on.
+rpc_host = "0.0.0.0"
+# Port for the above.
+rpc_port = 7002
+# Host for the proxyd WS server to listen on.
+ws_host = "0.0.0.0"
+# Port for the above
+# Set the ws_port to 0 to disable WS
+ws_port = 0
+# Maximum client body size, in bytes, that the server will accept.
+max_body_size_bytes = 10485760
+max_concurrent_rpcs = 1000
+# Server log level
+log_level = "info"
+allow_all_origins = true
+
+[redis]
+# URL to a Redis instance.
+url = ""
+
+[metrics]
+# Whether or not to enable Prometheus metrics.
+enabled = true
+# Host for the Prometheus metrics endpoint to listen on.
+host = "0.0.0.0"
+# Port for the above.
+port = 9761
+
+[cache]
+enabled = false
+ttl = "1s"
+
+[backend]
+# How long proxyd should wait for a backend response before timing out.
+response_timeout_seconds = 5
+# Maximum response size, in bytes, that proxyd will accept from a backend.
+max_response_size_bytes = 10485760
+# Maximum number of times proxyd will try a backend before giving up.
+max_retries = 3
+# Number of seconds to wait before trying an unhealthy backend again.
+out_of_service_seconds = 600
+# Maximum latency accepted to serve requests, default 10s
+max_latency_threshold = "30s"
+# Maximum latency accepted to serve requests before degraded, default 5s
+max_degraded_latency_threshold = "10s"
+# Maximum error rate accepted to serve requests, default 0.5 (i.e. 50%)
+max_error_rate_threshold = 0.3
+consensus_skip_peer_count = true
+
+[backends]
+[backends.egin-1]
+# The URL to contact the backend at. Will be read from the environment
+# if an environment variable prefixed with $ is provided.
+rpc_url = "http://xlayer-rpc:8545"
+max_rps = 3
+consensus_skip_peer_count = true
+
+[backend_groups.erigon_pay]
+backends = ["egin-1"]
+routing_strategy = "fallback"
+consensus_poller_interval = "100ms"
+consensus_max_block_lag = 0
+consensus_max_update_threshold = "1s"
+consensus_ha = false
+consensus_ha_heartbeat_interval = "20ms"
+
+[backend_groups.erigon_wo]
+backends = ["egin-1"]
+routing_strategy = "fallback"
+consensus_poller_interval = "100ms"
+consensus_max_block_lag = 0
+consensus_max_update_threshold = "1s"
+consensus_ha = false
+consensus_ha_heartbeat_interval = "20ms"
+
+# Mapping of methods to backend groups.
+[rpc_method_mappings]
+eth_call = "erigon_wo"
+eth_blockNumber = "erigon_wo"
+eth_getBalance = "erigon_wo"
+eth_sendRawTransaction = "erigon_wo"
+eth_getBlockByNumber = "erigon_wo"
+eth_getTransactionCount = "erigon_wo"
+eth_getInternalTransactions = "erigon_wo"
+eth_getTransactionByHash = "erigon_wo"
+eth_getBlockByHash = "erigon_wo"
+eth_getTransactionReceipt = "erigon_wo"
+eth_chainId = "erigon_pay"
+net_version = "erigon_pay"
+eth_gasPrice = "erigon_pay"
+eth_estimateGas = "erigon_pay"
+eth_getCode = "erigon_pay"
+eth_feeHistory = "erigon_pay"
+eth_maxPriorityFeePerGas = "erigon_pay"
+eth_getLogs = "erigon_pay"
+eth_syncing = "erigon_pay"
+eth_getBlockTransactionCountByNumber = "erigon_pay"
+eth_getStorageAt = "erigon_pay"
+eth_minGasPrice = "erigon_pay"
+debug_traceTransaction = "erigon_pay"
+debug_traceCall = "erigon_pay"
+trace_transaction = "erigon_pay"
+zkevm_batchNumber = "erigon_pay"
+zkevm_virtualBatchNumber = "erigon_pay"
+zkevm_verifiedBatchNumber = "erigon_pay"
+zkevm_getBatchSealTime = "erigon_pay"
+zkevm_getBatchByNumber = "erigon_pay"
+zkevm_getLatestGlobalExitRoot = "erigon_pay"
+zkevm_getBatchDataByNumbers = "erigon_pay"
+txpool_content = "erigon_pay"
+web3_clientVersion = "erigon_pay"

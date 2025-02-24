@@ -395,3 +395,11 @@ services:
       - ./config/xlayerconfig-mainnet.yaml:/usr/src/app/config.yaml
     command: >
       cdk-erigon --http.vhosts=* --http.corsdomain=* --ws --config=/usr/src/app/config.yaml
+
+  proxyd:
+    image: liudisteven/proxyd:1.0
+    container_name: xlayer-proxyd 
+    ports:
+      - "7002:7002"
+    volumes:
+      - ./config/proxyd.toml:/etc/proxyd/proxyd.toml 
