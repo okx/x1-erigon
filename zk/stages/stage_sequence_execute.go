@@ -49,23 +49,33 @@ func SpawnSequencingStage(
 	}
 
 	var highestBatchInDs uint64
-	var externalDataStreamServer server.DataStreamServer
-	if cfg.zk.SequencerResequenceExternalDatastream && !externalDataStreamServerCreated {
-		externalDataStreamServer, err = createExternalDataStreamServer(cfg)
+	if cfg.zk.SequencerResequence && cfg.zk.SequencerReplay {
+		var externalDataStreamServer server.DataStreamServer
+		if cfg.zk.SequencerReplayExternalDatastream && !externalDataStreamServerCreated {
+			externalDataStreamServer, err = createExternalDataStreamServer(cfg)
+			if err != nil {
+				return err
+			}
+			externalDataStreamServerCreated = true
+			highestBatchInDs, err = externalDataStreamServer.GetHighestBatchNumber()
+		} else {
+			highestBatchInDs, err = cfg.dataStreamServer.GetHighestBatchNumber()
+		}
 		if err != nil {
 			return err
 		}
-		externalDataStreamServerCreated = true
-		highestBatchInDs, err = externalDataStreamServer.GetHighestBatchNumber()
-	} else {
-		highestBatchInDs, err = cfg.dataStreamServer.GetHighestBatchNumber()
+		if lastBatch < highestBatchInDs {
+			return replay(s, u, ctx, cfg, historyCfg, lastBatch, highestBatchInDs, externalDataStreamServer)
+		}
 	}
+
+	highestBatchInDs, err = cfg.dataStreamServer.GetHighestBatchNumber()
 	if err != nil {
 		return err
 	}
 
 	if lastBatch < highestBatchInDs {
-		return resequence(s, u, ctx, cfg, historyCfg, lastBatch, highestBatchInDs, externalDataStreamServer)
+		return resequence(s, u, ctx, cfg, historyCfg, lastBatch, highestBatchInDs)
 	}
 
 	if cfg.zk.SequencerResequence {

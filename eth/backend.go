@@ -1935,7 +1935,7 @@ func (s *Ethereum) Start() error {
 // Ethereum protocol.
 func (s *Ethereum) Stop() error {
 	// Wait for the batch resequence done
-	if s.config.Zk.SequencerResequence && s.config.Zk.SequencerResequenceExternalDatastream {
+	if s.config.Zk.SequencerResequence && s.config.Zk.SequencerReplay && s.config.Zk.SequencerReplayExternalDatastream {
 		if done, running := zkStages.WaitResequenceBatchDone(); running {
 			s.logger.Info("Waiting for resequencing latest batch...")
 			<-done

@@ -581,16 +581,6 @@ var (
 		Usage: "When enabled, the sequencer will automatically resequence unseen batches stored in data stream",
 		Value: false,
 	}
-	SequencerResequenceHaltOnBatchNumber = cli.Uint64Flag{
-		Name:  "zkevm.sequencer-resequence-halt-on-batch-number",
-		Usage: "Halt the sequencer on this batch number when resequencing",
-		Value: 0,
-	}
-	SequencerResequenceExternalDatastream = cli.BoolFlag{
-		Name:  "zkevm.sequencer-resequence-external-datastream",
-		Usage: "When enabled, the sequencer will create a new data stream server connected to an external datastream file and read batches from it",
-		Value: false,
-	}
 	SequencerResequenceStrict = cli.BoolFlag{
 		Name:  "zkevm.sequencer-resequence-strict",
 		Usage: "Strictly resequence the rolledback batches",
@@ -600,6 +590,21 @@ var (
 		Name:  "zkevm.sequencer-resequence-reuse-l1-info-index",
 		Usage: "Reuse the L1 info index for resequencing",
 		Value: true,
+	}
+	SequencerReplay = cli.BoolFlag{
+		Name:  "zkevm.sequencer-replay",
+		Usage: "Local replay feature, only works when zkevm.sequencer-resequence enabled",
+		Value: false,
+	}
+	SequencerReplayHaltOnBatchNumber = cli.Uint64Flag{
+		Name:  "zkevm.sequencer-replay-halt-on-batch-number",
+		Usage: "Halt the sequencer on this batch number when replaying",
+		Value: 0,
+	}
+	SequencerReplayExternalDatastream = cli.BoolFlag{
+		Name:  "zkevm.sequencer-replay-external-datastream",
+		Usage: "When enabled, the sequencer will create a new data stream server connected to an external datastream file and read batches from it",
+		Value: false,
 	}
 	ExecutorUrls = cli.StringFlag{
 		Name:  "zkevm.executor-urls",

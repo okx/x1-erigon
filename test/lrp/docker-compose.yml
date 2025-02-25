@@ -2,8 +2,8 @@ networks:
   default:
     name: ${USER_PREFIX:-default}-erigon-lrp
 services:
-  xlayer-mainnet-lrp-unwind:
-    container_name: ${USER_PREFIX:-default}-xlayer-mainnet-lrp-unwind
+  xlayer-mainnet-unwind:
+    container_name: ${USER_PREFIX:-default}-xlayer-mainnet-unwind
     image: cdk-erigon:${IMAGE_TAG}
     environment:
       - CDK_ERIGON_SEQUENCER=0
@@ -15,10 +15,10 @@ services:
         --config=/usr/src/app/config.yaml \
         --chain xlayer-mainnet \
         --datadir /home/erigon/data/ \
-        --unwind-batch-no=134482
+        --unwind-batch-no=134484
 
-  xlayer-mainnet-lrp-resequence:
-    container_name: ${USER_PREFIX:-default}-xlayer-mainnet-lrp-resequence
+  xlayer-mainnet-replay:
+    container_name: ${USER_PREFIX:-default}-xlayer-mainnet-replay
     image: cdk-erigon:${IMAGE_TAG}
     environment:
       - CDK_ERIGON_SEQUENCER=1
@@ -33,12 +33,12 @@ services:
     profiles:
       - internal-ds
     command: >
-      cdk-erigon --zkevm.sequencer-resequence=true --zkevm.sequencer-resequence-halt-on-batch-number=134490 --http.vhosts=* --http.corsdomain=* --ws --config=/usr/src/app/config.yaml
+      cdk-erigon --zkevm.sequencer-resequence=true --zkevm.sequencer-replay=true --zkevm.sequencer-replay-halt-on-batch-number=134500 --http.vhosts=* --http.corsdomain=* --ws --config=/usr/src/app/config.yaml
 
-  xlayer-mainnet-lrp-resequence-with-external-datastream:
-    container_name: ${USER_PREFIX:-default}-xlayer-mainnet-lrp-resequence
+  xlayer-mainnet-replay-with-external-datastream:
+    container_name: ${USER_PREFIX:-default}-xlayer-mainnet-replay
     image: cdk-erigon:${IMAGE_TAG}
-    extends: xlayer-mainnet-lrp-resequence
+    extends: xlayer-mainnet-replay
     ports:
       - ${EXTERNAL_DS_PORT}:16900
     volumes:
@@ -47,7 +47,7 @@ services:
     profiles:
       - external-ds
     command: >
-      cdk-erigon --zkevm.sequencer-resequence=true --zkevm.sequencer-resequence-halt-on-batch-number=134490 --zkevm.sequencer-resequence-external-datastream=true --http.vhosts=* --http.corsdomain=* --ws --config=/usr/src/app/config.yaml
+      cdk-erigon --zkevm.sequencer-resequence=true --zkevm.sequencer-replay=true --zkevm.sequencer-replay-halt-on-batch-number=134500 --zkevm.sequencer-replay-external-datastream=true --http.vhosts=* --http.corsdomain=* --ws --config=/usr/src/app/config.yaml
 
   xlayer-executor:
     container_name: ${USER_PREFIX:-default}:-xlayer-executor
