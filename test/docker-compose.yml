@@ -99,6 +99,9 @@ services:
     container_name: xlayer-seq
     image: cdk-erigon
     environment:
+      - NO_SYNC=true
+      - WRITE_MAP=true
+      - MDBX_READAHEAD=false
       - CDK_ERIGON_SEQUENCER=1
     ports:
       - 6060:6060
@@ -384,6 +387,9 @@ services:
     image: cdk-erigon
     environment:
       - CDK_ERIGON_SEQUENCER=1
+      - NO_SYNC=true
+      - WRITE_MAP=true
+      - MDBX_READAHEAD=false
     ports:
       - 6060:6060
       - 8123:8545

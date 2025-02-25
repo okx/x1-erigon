@@ -3,7 +3,10 @@ package smt
 import (
 	"context"
 	"fmt"
+	"github.com/ledgerwatch/log/v3"
+	"runtime"
 	"sync"
+	"time"
 
 	"github.com/dgravesa/go-parallel/parallel"
 	"github.com/ledgerwatch/erigon/smt/pkg/utils"
@@ -51,7 +54,7 @@ func (s *SMT) InsertBatch(cfg InsertBatchConfig, nodeKeys []*utils.NodeKey, node
 		nodeHashesForDelete       = make(map[uint64]map[uint64]map[uint64]map[uint64]*utils.NodeKey)
 	)
 
-	//BE CAREFUL: modifies the arrays
+	// BE CAREFUL: modifies the arrays
 	if err := s.preprocessBatchedNodeValues(
 		cfg.logPrefix,
 		cfg.shouldPrintProgress,
@@ -63,7 +66,7 @@ func (s *SMT) InsertBatch(cfg InsertBatchConfig, nodeKeys []*utils.NodeKey, node
 		return nil, fmt.Errorf("preprocessBatchedNodeValues: %w", err)
 	}
 
-	//DO NOT MOVE ABOVE PREPROCESS
+	// DO NOT MOVE ABOVE PREPROCESS
 	size = len(nodeKeys)
 
 	progressChan, stopProgressPrinter := getProgressPrinterPre(cfg.logPrefix, "process", uint64(size), cfg.shouldPrintProgress)
@@ -118,19 +121,12 @@ func (s *SMT) InsertBatch(cfg InsertBatchConfig, nodeKeys []*utils.NodeKey, node
 				if insertingPointerToSmtBatchNode, err = (*insertingPointerToSmtBatchNode).createALeafInEmptyDirection(insertingNodePath, insertingNodePathLevel, insertingNodeKey); err != nil {
 					return nil, err
 				}
-				// EXPLAIN THE LINE BELOW: there is no need to update insertingRemainingKey because it is not needed anymore therefore its value is incorrect if used after this line
-				// insertingRemainingKey = *((*insertingPointerToSmtBatchNode).nodeLeftKeyOrRemainingKey)
 				insertingNodePathLevel++
 			}
 
-			// EXPLAIN THE LINE BELOW: cannot delete the old values because it might be used as a value of an another node
-			// updateNodeHashesForDelete(nodeHashesForDelete, []*utils.NodeKey{(*insertingPointerToSmtBatchNode).nodeRightHashOrValueHash})
 			(*insertingPointerToSmtBatchNode).nodeRightHashOrValueHash = (*utils.NodeKey)(insertingNodeValueHash)
 		} else {
 			if (*insertingPointerToSmtBatchNode).nodeLeftHashOrRemainingKey.IsEqualTo(insertingRemainingKey) {
-				// EXPLAIN THE LINE BELOW: cannot delete the old values because it might be used as a value of an another node
-				// updateNodeHashesForDelete(nodeHashesForDelete, []*utils.NodeKey{(*insertingPointerToSmtBatchNode).nodeRightHashOrValueHash})
-
 				parentAfterDelete := &((*insertingPointerToSmtBatchNode).parentNode)
 				*insertingPointerToSmtBatchNode = nil
 				insertingPointerToSmtBatchNode = parentAfterDelete
@@ -138,22 +134,17 @@ func (s *SMT) InsertBatch(cfg InsertBatchConfig, nodeKeys []*utils.NodeKey, node
 					(*insertingPointerToSmtBatchNode).updateHashesAfterDelete()
 				}
 				insertingNodePathLevel--
-				// EXPLAIN THE LINE BELOW: there is no need to update insertingRemainingKey because it is not needed anymore therefore its value is incorrect if used after this line
-				// insertingRemainingKey = utils.RemoveKeyBits(*insertingNodeKey, insertingNodePathLevel)
 			}
 
 			for {
-				// the root node has been deleted so we can safely break
 				if *insertingPointerToSmtBatchNode == nil {
 					break
 				}
 
-				// a leaf (with mismatching remaining key) => nothing to collapse
 				if (*insertingPointerToSmtBatchNode).isLeaf() {
 					break
 				}
 
-				// does not have a single leaf => nothing to collapse
 				theSingleNodeLeaf, theSingleNodeLeafDirection := (*insertingPointerToSmtBatchNode).getTheSingleLeafAndDirectionIfAny()
 				if theSingleNodeLeaf == nil {
 					break
@@ -168,6 +159,7 @@ func (s *SMT) InsertBatch(cfg InsertBatchConfig, nodeKeys []*utils.NodeKey, node
 			maxInsertingNodePathLevel = insertingNodePathLevel
 		}
 	}
+
 	select {
 	case *progressChan <- uint64(1):
 	default:
@@ -186,10 +178,12 @@ func (s *SMT) InsertBatch(cfg InsertBatchConfig, nodeKeys []*utils.NodeKey, node
 		return nil, fmt.Errorf("saveBatchedNodeValues: %w", err)
 	}
 
+	// 4. Calculate and Save Hashes Dfs (此操作保持在主线程外部)
 	if smtBatchNodeRoot == nil {
 		rootNodeHash = &utils.NodeKey{0, 0, 0, 0}
 	} else {
 		sdh := newSmtDfsHelper(s)
+		t1 := time.Now()
 
 		go func() {
 			defer sdh.destroy()
@@ -204,6 +198,7 @@ func (s *SMT) InsertBatch(cfg InsertBatchConfig, nodeKeys []*utils.NodeKey, node
 			}
 		}
 		sdh.wg.Wait()
+		log.Info("[FUCK] calculateAndSaveHashesDfs", "duration", time.Since(t1))
 	}
 	if err := s.setLastRoot(*rootNodeHash); err != nil {
 		return nil, err
@@ -437,20 +432,32 @@ func (s *SMT) findInsertingPoint(
 ) {
 	insertingNodePathLevel = -1
 	visitedNodeHashes = make([]*utils.NodeKey, 0, 256)
+	visitedNodeMap := make(map[string]struct{}) // 用于避免重复添加节点
 
 	var (
 		insertingPointerToSmtBatchNodeParent *smtBatchNode
 		nextInsertingPointerNodeHash         *utils.NodeKey
 	)
 
+	// 辅助函数：将 NodeKey 转换为 BigInt 字符串
+	toBigIntString := func(nodeKey *utils.NodeKey) string {
+		return nodeKey.ToBigInt().String()
+	}
+
 	for {
-		if (*insertingPointerToSmtBatchNode) == nil { // update in-memory structure from db
+		if (*insertingPointerToSmtBatchNode) == nil { // 从数据库更新内存结构
 			if !insertingPointerNodeHash.IsZero() {
 				*insertingPointerToSmtBatchNode, err = s.fetchNodeDataFromDb(insertingPointerNodeHash, insertingPointerToSmtBatchNodeParent)
 				if err != nil {
 					return -2, insertingPointerToSmtBatchNode, visitedNodeHashes, err
 				}
-				visitedNodeHashes = append(visitedNodeHashes, insertingPointerNodeHash)
+
+				// 使用 ToBigInt() 进行去重操作
+				nodeHashStr := toBigIntString(insertingPointerNodeHash)
+				if _, exists := visitedNodeMap[nodeHashStr]; !exists {
+					visitedNodeHashes = append(visitedNodeHashes, insertingPointerNodeHash)
+					visitedNodeMap[nodeHashStr] = struct{}{}
+				}
 			} else {
 				if insertingNodePathLevel != -1 {
 					return -2, insertingPointerToSmtBatchNode, visitedNodeHashes, fmt.Errorf("nodekey is zero at non-root level")
@@ -467,31 +474,36 @@ func (s *SMT) findInsertingPoint(
 
 		insertingNodePathLevel++
 
+		// 如果节点是叶子节点，跳出循环
 		if (*insertingPointerToSmtBatchNode).isLeaf() {
 			break
 		}
 
 		if fetchDirectSiblings {
-			// load direct siblings of a non-leaf from the DB
-			if (*insertingPointerToSmtBatchNode).leftNode == nil {
-				(*insertingPointerToSmtBatchNode).leftNode, err = s.fetchNodeDataFromDb((*insertingPointerToSmtBatchNode).nodeLeftHashOrRemainingKey, (*insertingPointerToSmtBatchNode))
-				if err != nil {
-					return -2, insertingPointerToSmtBatchNode, visitedNodeHashes, err
-				}
-				visitedNodeHashes = append(visitedNodeHashes, (*insertingPointerToSmtBatchNode).nodeLeftHashOrRemainingKey)
+			// 批量加载左兄弟和右兄弟
+			err := s.fetchSiblingNodes(*insertingPointerToSmtBatchNode)
+			if err != nil {
+				return -2, insertingPointerToSmtBatchNode, visitedNodeHashes, err
 			}
-			if (*insertingPointerToSmtBatchNode).rightNode == nil {
-				(*insertingPointerToSmtBatchNode).rightNode, err = s.fetchNodeDataFromDb((*insertingPointerToSmtBatchNode).nodeRightHashOrValueHash, (*insertingPointerToSmtBatchNode))
-				if err != nil {
-					return -2, insertingPointerToSmtBatchNode, visitedNodeHashes, err
-				}
+
+			// 记录访问的兄弟节点，避免重复添加
+			leftHashStr := toBigIntString((*insertingPointerToSmtBatchNode).nodeLeftHashOrRemainingKey)
+			if _, exists := visitedNodeMap[leftHashStr]; !exists {
+				visitedNodeHashes = append(visitedNodeHashes, (*insertingPointerToSmtBatchNode).nodeLeftHashOrRemainingKey)
+				visitedNodeMap[leftHashStr] = struct{}{}
+			}
+
+			rightHashStr := toBigIntString((*insertingPointerToSmtBatchNode).nodeRightHashOrValueHash)
+			if _, exists := visitedNodeMap[rightHashStr]; !exists {
 				visitedNodeHashes = append(visitedNodeHashes, (*insertingPointerToSmtBatchNode).nodeRightHashOrValueHash)
+				visitedNodeMap[rightHashStr] = struct{}{}
 			}
 		}
 
 		insertDirection := insertingNodePath[insertingNodePathLevel]
-		nextInsertingPointerNodeHash = (*insertingPointerToSmtBatchNode).getNextNodeHashInDirection(insertDirection)
-		nextInsertingPointerToSmtBatchNode = (*insertingPointerToSmtBatchNode).getChildInDirection(insertDirection)
+		// 使用 getNextNodeInfo 获取下一个节点的哈希和指针
+		nextInsertingPointerNodeHash, nextInsertingPointerToSmtBatchNode = (*insertingPointerToSmtBatchNode).getNextNodeInfo(insertDirection)
+
 		if nextInsertingPointerNodeHash.IsZero() && (*nextInsertingPointerToSmtBatchNode) == nil {
 			break
 		}
@@ -502,6 +514,23 @@ func (s *SMT) findInsertingPoint(
 	}
 
 	return insertingNodePathLevel, insertingPointerToSmtBatchNode, visitedNodeHashes, nil
+}
+
+func (s *SMT) fetchSiblingNodes(node *smtBatchNode) error {
+	var err error
+	if node.leftNode == nil {
+		node.leftNode, err = s.fetchNodeDataFromDb(node.nodeLeftHashOrRemainingKey, node)
+		if err != nil {
+			return err
+		}
+	}
+	if node.rightNode == nil {
+		node.rightNode, err = s.fetchNodeDataFromDb(node.nodeRightHashOrValueHash, node)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func updateNodeHashesForDelete(
@@ -517,49 +546,104 @@ func updateNodeHashesForDelete(
 	}
 }
 
-// no point to parallelize this function because db consumer is slower than this producer
 func calculateAndSaveHashesDfs(
 	sdh *smtDfsHelper,
-	smtBatchNode *smtBatchNode,
+	smtBatchRootNode *smtBatchNode,
 	path []int,
 	level int,
 ) {
-	if smtBatchNode.isLeaf() {
-		hashObj, hashValue := utils.HashKeyAndValueByPointers(utils.ConcatArrays4ByPointers(smtBatchNode.nodeLeftHashOrRemainingKey.AsUint64Pointer(), smtBatchNode.nodeRightHashOrValueHash.AsUint64Pointer()), &utils.LeafCapacity)
-		smtBatchNode.hash = hashObj
-		if !sdh.s.noSaveOnInsert {
-			sdh.dataChan <- newSmtDfsHelperDataStruct(hashObj, hashValue)
+	const maxConcurrencyFactor = 2
+	dataChan := sdh.dataChan
+	noSave := sdh.s.noSaveOnInsert
 
-			nodeKey := utils.JoinKey(path[:level], *smtBatchNode.nodeLeftHashOrRemainingKey)
-			sdh.dataChan <- newSmtDfsHelperDataStruct(hashObj, nodeKey)
+	// Handle leaf node inline
+	if smtBatchRootNode.isLeaf() {
+		hashObj, hashValue := utils.HashKeyAndValueByPointers(
+			utils.ConcatArrays4ByPointers(
+				smtBatchRootNode.nodeLeftHashOrRemainingKey.AsUint64Pointer(),
+				smtBatchRootNode.nodeRightHashOrValueHash.AsUint64Pointer(),
+			),
+			&utils.LeafCapacity,
+		)
+		smtBatchRootNode.hash = hashObj
+
+		if !noSave && len(dataChan) < cap(dataChan) {
+			buffer1 := newSmtDfsHelperDataStruct(hashObj, hashValue)
+			buffer2 := newSmtDfsHelperDataStruct(hashObj, utils.JoinKey(path[:level], *smtBatchRootNode.nodeLeftHashOrRemainingKey))
+			select {
+			case dataChan <- buffer1:
+				dataChan <- buffer2
+			default:
+			}
 		}
 		return
 	}
 
+	// Initialize path pool and semaphore
+	var pathPool = sync.Pool{
+		New: func() interface{} {
+			return make([]int, 0, cap(path)) // Use original capacity
+		},
+	}
+	maxConcurrency := runtime.NumCPU() * maxConcurrencyFactor
+	sem := make(chan struct{}, maxConcurrency)
+	var wg sync.WaitGroup
 	var totalHash utils.NodeValue8
 
-	if smtBatchNode.leftNode != nil {
-		path[level] = 0
-		calculateAndSaveHashesDfs(sdh, smtBatchNode.leftNode, path, level+1)
-		totalHash.SetHalfValue(*smtBatchNode.leftNode.hash, 0) // no point to check for error because we used hardcoded 0 which ensures that no error will be returned
-	} else {
-		totalHash.SetHalfValue(*smtBatchNode.nodeLeftHashOrRemainingKey, 0) // no point to check for error because we used hardcoded 0 which ensures that no error will be returned
+	// Process children
+	children := [2]*smtBatchNode{smtBatchRootNode.leftNode, smtBatchRootNode.rightNode}
+	for i, child := range children {
+		if child == nil {
+			defaultHash := smtBatchRootNode.nodeLeftHashOrRemainingKey
+			if i == 1 {
+				defaultHash = smtBatchRootNode.nodeRightHashOrValueHash
+			}
+			totalHash.SetHalfValue(*defaultHash, i)
+			continue
+		}
+
+		// Ensure path has enough length for the new level
+		if level >= len(path) {
+			path = append(path, 0) // Grow path if needed
+		}
+		path[level] = i
+
+		if level < 3 { // Serial processing for shallow levels
+			calculateAndSaveHashesDfs(sdh, child, path, level+1)
+			totalHash.SetHalfValue(*child.hash, i)
+		} else { // Parallel processing for deeper levels
+			wg.Add(1)
+			sem <- struct{}{}
+			childPath := append(pathPool.Get().([]int), path[:level+1]...)
+
+			go func(c *smtBatchNode, p []int) {
+				defer func() {
+					<-sem
+					pathPool.Put(p[:0])
+					wg.Done()
+				}()
+				calculateAndSaveHashesDfs(sdh, c, p, level+1)
+			}(child, childPath)
+		}
 	}
 
-	if smtBatchNode.rightNode != nil {
-		path[level] = 1
-		calculateAndSaveHashesDfs(sdh, smtBatchNode.rightNode, path, level+1)
-		totalHash.SetHalfValue(*smtBatchNode.rightNode.hash, 1) // no point to check for error because we used hardcoded 1 which ensures that no error will be returned
-	} else {
-		totalHash.SetHalfValue(*smtBatchNode.nodeRightHashOrValueHash, 1) // no point to check for error because we used hardcoded 1 which ensures that no error will be returned
+	// Wait for all goroutines to complete
+	wg.Wait()
+
+	// Update totalHash with child hashes after all are computed
+	for i, child := range children {
+		if child != nil && level >= 3 {
+			totalHash.SetHalfValue(*child.hash, i)
+		}
 	}
 
+	// Compute and set the current node's hash
 	hashObj, hashValue := utils.HashKeyAndValueByPointers(totalHash.ToUintArrayByPointer(), &utils.BranchCapacity)
-	if !sdh.s.noSaveOnInsert {
-		sdh.dataChan <- newSmtDfsHelperDataStruct(hashObj, hashValue)
-	}
+	smtBatchRootNode.hash = hashObj
 
-	smtBatchNode.hash = hashObj
+	if !noSave && len(dataChan) < cap(dataChan) {
+		dataChan <- newSmtDfsHelperDataStruct(hashObj, hashValue)
+	}
 }
 
 type smtBatchNode struct {
@@ -610,6 +694,22 @@ func (s *SMT) fetchNodeDataFromDb(nodeHash *utils.NodeKey, parentNode *smtBatchN
 
 func (sbn *smtBatchNode) isLeaf() bool {
 	return sbn.leaf
+}
+
+func (node *smtBatchNode) getNextNodeInfo(insertDirection int) (*utils.NodeKey, **smtBatchNode) {
+	var nextNodeHash *utils.NodeKey
+	var nextNodePointer **smtBatchNode
+
+	// 根据插入方向选择左或右节点
+	if insertDirection == 0 { // 假设 0 是左子节点
+		nextNodeHash = node.nodeLeftHashOrRemainingKey
+		nextNodePointer = &node.leftNode
+	} else { // 其他情况下是右子节点
+		nextNodeHash = node.nodeRightHashOrValueHash
+		nextNodePointer = &node.rightNode
+	}
+
+	return nextNodeHash, nextNodePointer
 }
 
 func (sbn *smtBatchNode) getTheSingleLeafAndDirectionIfAny() (*smtBatchNode, int) {

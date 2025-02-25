@@ -89,7 +89,7 @@ func NewMDBX(log log.Logger) MdbxOpts {
 		mapSize:         DefaultMapSize,
 		growthStep:      DefaultGrowthStep,
 		mergeThreshold:  3 * 8192,
-		shrinkThreshold: -1, // default
+		shrinkThreshold: 2 * 1024 * 1024 * 1024, // default
 		label:           kv.InMem,
 	}
 	return opts
@@ -191,6 +191,9 @@ func (opts MdbxOpts) MapSize(sz datasize.ByteSize) MdbxOpts {
 
 func (opts MdbxOpts) WriteMap() MdbxOpts {
 	opts.flags |= mdbx.WriteMap
+	opts.flags |= mdbx.SafeNoSync
+	opts.flags |= mdbx.LifoReclaim
+	opts.flags |= mdbx.Coalesce
 	return opts
 }
 func (opts MdbxOpts) LifoReclaim() MdbxOpts {
@@ -265,7 +268,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 
 	}
 
-	env, err := mdbx.NewEnv()
+	env, err := mdbx.NewEnv(mdbx.Default)
 	if err != nil {
 		return nil, err
 	}
@@ -279,6 +282,10 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 		return nil, err
 	}
 	if err = env.SetOption(mdbx.OptMaxReaders, kv.ReadersLimit); err != nil {
+		return nil, err
+	}
+
+	if err = env.SetGeometry(-1, -1, int(opts.mapSize), int(opts.growthStep), opts.shrinkThreshold, int(opts.pageSize)); err != nil {
 		return nil, err
 	}
 
@@ -409,7 +416,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 		writeTxLimiter: opts.writeTxLimiter,
 
 		txsCountMutex:         txsCountMutex,
-		txsAllDoneOnCloseCond: sync.NewCond(txsCountMutex),
+		txsAllDoneOnCloseCond: sync.NewCond(&sync.Mutex{}),
 
 		leakDetector: dbg.NewLeakDetector("db."+opts.label.String(), dbg.SlowTx()),
 
@@ -696,16 +703,19 @@ func (db *MdbxKV) trackTxBegin() bool {
 }
 
 func (db *MdbxKV) hasTxsAllDoneAndClosed() bool {
+	db.txsCountMutex.Lock()
+	defer db.txsCountMutex.Unlock()
 	return (db.txsCount == 0) && db.closed.Load()
 }
 
 func (db *MdbxKV) trackTxEnd() {
 	db.txsCountMutex.Lock()
-	defer db.txsCountMutex.Unlock()
 
 	if db.txsCount > 0 {
 		db.txsCount--
+		db.txsCountMutex.Unlock()
 	} else {
+		db.txsCountMutex.Unlock()
 		panic("MdbxKV: unmatched trackTxEnd")
 	}
 
@@ -715,9 +725,6 @@ func (db *MdbxKV) trackTxEnd() {
 }
 
 func (db *MdbxKV) waitTxsAllDoneOnClose() {
-	db.txsCountMutex.Lock()
-	defer db.txsCountMutex.Unlock()
-
 	for !db.hasTxsAllDoneAndClosed() {
 		db.txsAllDoneOnCloseCond.Wait()
 	}
@@ -751,14 +758,13 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 		// otherwise carry on
 	}
 
-	if !db.trackTxBegin() {
-		return nil, fmt.Errorf("db closed")
-	}
-
 	// will return nil err if context is cancelled (may appear to acquire the semaphore)
 	if semErr := db.readTxLimiter.Acquire(ctx, 1); semErr != nil {
-		db.trackTxEnd()
 		return nil, fmt.Errorf("mdbx.MdbxKV.BeginRo: roTxsLimiter error %w", semErr)
+	}
+
+	if !db.trackTxBegin() {
+		return nil, fmt.Errorf("db closed")
 	}
 
 	defer func() {
@@ -1069,49 +1075,67 @@ func (tx *MdbxTx) Commit() error {
 	if tx.tx == nil {
 		return nil
 	}
-	defer func() {
-		tx.tx = nil
-		tx.db.trackTxEnd()
-		if tx.readOnly {
-			tx.db.readTxLimiter.Release(1)
-		} else {
-			tx.db.writeTxLimiter.Release(1)
-			runtime.UnlockOSThread()
-		}
-		tx.db.leakDetector.Del(tx.id)
+
+	var wg sync.WaitGroup
+	wg.Add(1) // 为 CollectMetrics 增加一个等待组
+
+	// 启动独立的线程来执行 CollectMetrics
+	go func() {
+		defer wg.Done() // 确保 CollectMetrics 执行完后会调用 Done
+		tx.CollectMetrics()
 	}()
-	tx.closeCursors()
 
-	//slowTx := 10 * time.Second
-	//if debug.SlowCommit() > 0 {
-	//	slowTx = debug.SlowCommit()
+	//// 在提交之前进行相关的调试信息收集
+	//if debug.SlowCommit() > 0 || debug.BigRoTxKb() > 0 || debug.BigRwTxKb() > 0 {
+	//	go tx.PrintDebugInfo()
 	//}
-	//
-	//if debug.BigRoTxKb() > 0 || debug.BigRwTxKb() > 0 {
-	//	tx.PrintDebugInfo()
-	//}
-	tx.CollectMetrics()
 
+	// 提交事务
 	latency, err := tx.tx.Commit()
 	if err != nil {
 		return fmt.Errorf("label: %s, %w", tx.db.opts.label, err)
 	}
 
-	if tx.db.opts.label == kv.ChainDB {
-		kv.DbCommitPreparation.Observe(latency.Preparation.Seconds())
-		//kv.DbCommitAudit.Update(latency.Audit.Seconds())
-		kv.DbCommitWrite.Observe(latency.Write.Seconds())
-		kv.DbCommitSync.Observe(latency.Sync.Seconds())
-		kv.DbCommitEnding.Observe(latency.Ending.Seconds())
-		kv.DbCommitTotal.Observe(latency.Whole.Seconds())
+	// 等待 CollectMetrics 完成
+	wg.Wait()
 
-		//kv.DbGcWorkPnlMergeTime.Update(latency.GCDetails.WorkPnlMergeTime.Seconds())
-		//kv.DbGcWorkPnlMergeVolume.Set(uint64(latency.GCDetails.WorkPnlMergeVolume))
-		//kv.DbGcWorkPnlMergeCalls.Set(uint64(latency.GCDetails.WorkPnlMergeCalls))
-		//
-		//kv.DbGcSelfPnlMergeTime.Update(latency.GCDetails.SelfPnlMergeTime.Seconds())
-		//kv.DbGcSelfPnlMergeVolume.Set(uint64(latency.GCDetails.SelfPnlMergeVolume))
-		//kv.DbGcSelfPnlMergeCalls.Set(uint64(latency.GCDetails.SelfPnlMergeCalls))
+	// 事务成功提交后，执行清理操作
+	defer func() {
+		// 清理 tx.tx 和相关资源
+		tx.tx = nil
+		tx.db.trackTxEnd()
+
+		// 异步执行剩余资源释放和关闭
+		go func() {
+			if tx.readOnly {
+				tx.db.readTxLimiter.Release(1)
+			} else {
+				tx.db.writeTxLimiter.Release(1)
+				runtime.UnlockOSThread()
+			}
+			tx.db.leakDetector.Del(tx.id)
+			tx.closeCursors()
+		}()
+	}()
+
+	// 记录数据库相关的指标
+	if tx.db.opts.label == kv.ChainDB {
+		go func() {
+			kv.DbCommitPreparation.Observe(latency.Preparation.Seconds())
+			kv.DbCommitWrite.Observe(latency.Write.Seconds())
+			kv.DbCommitSync.Observe(latency.Sync.Seconds())
+			kv.DbCommitEnding.Observe(latency.Ending.Seconds())
+			kv.DbCommitTotal.Observe(latency.Whole.Seconds())
+
+			// 可选的 GC 相关指标
+			// kv.DbGcWorkPnlMergeTime.Update(latency.GCDetails.WorkPnlMergeTime.Seconds())
+			// kv.DbGcWorkPnlMergeVolume.Set(uint64(latency.GCDetails.WorkPnlMergeVolume))
+			// kv.DbGcWorkPnlMergeCalls.Set(uint64(latency.GCDetails.WorkPnlMergeCalls))
+			//
+			// kv.DbGcSelfPnlMergeTime.Update(latency.GCDetails.SelfPnlMergeTime.Seconds())
+			// kv.DbGcSelfPnlMergeVolume.Set(uint64(latency.GCDetails.SelfPnlMergeVolume))
+			// kv.DbGcSelfPnlMergeCalls.Set(uint64(latency.GCDetails.SelfPnlMergeCalls))
+		}()
 	}
 
 	return nil

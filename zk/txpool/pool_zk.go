@@ -177,6 +177,11 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 // zk: the implementation of best here is changed only to not take into account block gas limits as we don't care about
 // these in zk.  Instead we do a quick check on the transaction maximum gas in zk
 func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableGas, availableBlobGas uint64, toSkip mapset.Set[[32]byte]) (bool, int, error) {
+	// we need to take a lock here to avoid a potential deadlock with the pool flush routine.  Nested locks are not a good pattern
+	// but it is difficult to avoid here as the flush routine needs to wait until the best queue is unlocked before it can flush
+	p.flushMtx.Lock()
+	defer p.flushMtx.Unlock()
+
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
@@ -220,7 +225,7 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 			// remove ldn txs when not in london
 			toRemove = append(toRemove, mt)
 			toSkip.Add(mt.Tx.IDHash)
-			//log.Trace("Removing London transaction in non-London environment", "txID", mt.Tx.IDHash)
+			//log.Info("Removing London transaction in non-London environment", "txID", mt.Tx.IDHash)
 			continue
 		}
 
@@ -237,7 +242,7 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 		}
 		if len(rlpTx) == 0 {
 			toRemove = append(toRemove, mt)
-			//log.Trace("Removing transaction with empty RLP", "txID", mt.Tx.IDHash)
+			//log.Info("Removing transaction with empty RLP", "txID", common.BytesToHash(mt.Tx.IDHash[:]))
 			continue
 		}
 
@@ -276,7 +281,8 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 	if len(toRemove) > 0 {
 		for _, mt := range toRemove {
 			p.pending.Remove(mt)
-			//log.Trace("Removed transaction from pending pool", "txID", mt.Tx.IDHash)
+			p.discardLocked(mt, UnsupportedTx)
+			//log.Debug("Removed transaction from pending pool", "txID", mt.Tx.IDHash)
 		}
 	}
 	return true, count, nil
@@ -357,13 +363,49 @@ func (p *TxPool) RemoveMinedTransactions(ctx context.Context, tx kv.Tx, blockGas
 	return nil
 }
 
+func (p *TxPool) TriggerSenderStateChanges(ctx context.Context, tx kv.Tx, blockGasLimit uint64, senders map[common.Address]struct{}) error {
+	if len(senders) == 0 {
+		return nil
+	}
+
+	cache := p.cache()
+
+	p.lock.Lock()
+	defer p.lock.Unlock()
+
+	sendersToUpdate := make(map[uint64]struct{})
+	for sender := range senders {
+		if id, ok := p.senders.senderIDs[sender]; ok {
+			sendersToUpdate[id] = struct{}{}
+		}
+	}
+
+	baseFee := p.pendingBaseFee.Load()
+
+	cacheView, err := cache.View(ctx, tx)
+	if err != nil {
+		return err
+	}
+
+	for senderID := range sendersToUpdate {
+		nonce, balance, err := p.senders.info(cacheView, senderID)
+		if err != nil {
+			return err
+		}
+		p.onSenderStateChange(senderID, nonce, balance, p.all,
+			baseFee, blockGasLimit, p.pending, p.baseFee, p.queued, p.discardLocked)
+	}
+
+	return nil
+}
+
 // discards the transactions that are in overflowZkCoutners from pending
 // executes the discard function on them
 // deletes the tx from the sendersWithChangedState map
 // deletes the discarded txs from the overflowZkCounters
 func (p *TxPool) discardOverflowZkCountersFromPending(pending *PendingPool, discard func(*metaTx, DiscardReason), sendersWithChangedState map[uint64]struct{}) {
 	for _, mt := range p.overflowZkCounters {
-		log.Info("[tx_pool] Removing TX from pending due to counter overflow", "tx", mt.Tx.IDHash)
+		log.Info("[tx_pool] Removing TX from pending due to counter overflow", "tx", common.BytesToHash(mt.Tx.IDHash[:]))
 		pending.Remove(mt)
 		discard(mt, OverflowZkCounters)
 		sendersWithChangedState[mt.Tx.SenderID] = struct{}{}

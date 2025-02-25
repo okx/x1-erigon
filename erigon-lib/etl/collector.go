@@ -175,11 +175,10 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 	}
 
 	bucket := toBucket
-
 	var cursor kv.RwCursor
-	haveSortingGuaranties := isIdentityLoadFunc(loadFunc) // user-defined loadFunc may change ordering
+	haveSortingGuaranties := isIdentityLoadFunc(loadFunc)
 	var lastKey []byte
-	if bucket != "" { // passing empty bucket name is valid case for etl when DB modification is not expected
+	if bucket != "" {
 		var err error
 		cursor, err = db.RwCursor(bucket)
 		if err != nil {
@@ -198,7 +197,40 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
+	// 批量处理配置
+	batchLimit := 3000
+	batchKeys := make([][]byte, 0, batchLimit)
+	batchValues := make([][]byte, 0, batchLimit)
+	batchDeletes := make([][]byte, 0, batchLimit)
 	i := 0
+
+	// 批量删除操作
+	batchDelete := func(db kv.RwTx, keys [][]byte, bucket string) error {
+		for _, key := range keys {
+			if err := cursor.Delete(key); err != nil {
+				return fmt.Errorf("batch delete failed: %w", err)
+			}
+		}
+		return nil
+	}
+
+	// 批量 put 操作
+	batchPut := func(db kv.RwTx, keys [][]byte, values [][]byte, isDupSort bool, bucket string) error {
+		for i := 0; i < len(keys); i++ {
+			if isDupSort {
+				if err := cursor.(kv.RwCursorDupSort).AppendDup(keys[i], values[i]); err != nil {
+					return fmt.Errorf("appendDup batch failed: %w", err)
+				}
+			} else {
+				if err := cursor.Append(keys[i], values[i]); err != nil {
+					return fmt.Errorf("append batch failed: %w", err)
+				}
+			}
+		}
+		return nil
+	}
+
+	// 加载数据并标记删除
 	loadNextFunc := func(_, k, v []byte) error {
 		if i == 0 {
 			isEndOfBucket := lastKey == nil || bytes.Compare(lastKey, k) == -1
@@ -206,44 +238,53 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 		}
 		i++
 
+		// 记录日志
 		select {
-		default:
 		case <-logEvery.C:
-			logArs := []interface{}{"into", bucket}
+			logArgs := []interface{}{"into", bucket}
 			if args.LogDetailsLoad != nil {
-				logArs = append(logArs, args.LogDetailsLoad(k, v)...)
+				logArgs = append(logArgs, args.LogDetailsLoad(k, v)...)
 			} else {
-				logArs = append(logArs, "current_prefix", makeCurrentKeyStr(k))
+				logArgs = append(logArgs, "current_prefix", makeCurrentKeyStr(k))
 			}
-
-			c.logger.Log(c.logLvl, fmt.Sprintf("[%s] ETL [2/2] Loading", c.logPrefix), logArs...)
+			c.logger.Log(c.logLvl, fmt.Sprintf("[%s] ETL [2/2] Loading", c.logPrefix), logArgs...)
+		default:
 		}
 
-		isNil := (c.bufType == SortableSliceBuffer && v == nil) ||
-			(c.bufType == SortableAppendBuffer && len(v) == 0) || //backward compatibility
-			(c.bufType == SortableOldestAppearedBuffer && len(v) == 0)
-		if isNil {
+		// 处理 nil 值
+		if len(v) == 0 {
 			if canUseAppend {
-				return nil // nothing to delete after end of bucket
+				return nil
 			}
-			if err := cursor.Delete(k); err != nil {
-				return err
+			// 缓存删除操作
+			batchDeletes = append(batchDeletes, k)
+			if len(batchDeletes) >= batchLimit {
+				// 延迟执行批量删除
+				if err := batchDelete(db, batchDeletes, toBucket); err != nil {
+					return err
+				}
+				batchDeletes = batchDeletes[:0] // 清空缓存
 			}
 			return nil
 		}
-		if canUseAppend {
-			if isDupSort {
-				if err := cursor.(kv.RwCursorDupSort).AppendDup(k, v); err != nil {
-					return fmt.Errorf("%s: bucket: %s, appendDup: k=%x, %w", c.logPrefix, bucket, k, err)
-				}
-			} else {
-				if err := cursor.Append(k, v); err != nil {
-					return fmt.Errorf("%s: bucket: %s, append: k=%x, v=%x, %w", c.logPrefix, bucket, k, v, err)
-				}
-			}
 
+		// 批量写入操作
+		if canUseAppend {
+			batchKeys = append(batchKeys, k)
+			batchValues = append(batchValues, v)
+
+			if len(batchKeys) >= batchLimit {
+				// 批量 put
+				if err := batchPut(db, batchKeys, batchValues, isDupSort, toBucket); err != nil {
+					return err
+				}
+				batchKeys = batchKeys[:0] // 清空缓存
+				batchValues = batchValues[:0]
+			}
 			return nil
 		}
+
+		// 默认 put 操作
 		if err := cursor.Put(k, v); err != nil {
 			return fmt.Errorf("%s: put: k=%x, %w", c.logPrefix, k, err)
 		}
@@ -254,10 +295,24 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 	simpleLoad := func(k, v []byte) error {
 		return loadFunc(k, v, currentTable, loadNextFunc)
 	}
+
+	// 执行加载并合并
 	if err := mergeSortFiles(c.logPrefix, c.dataProviders, simpleLoad, args, c.buf); err != nil {
 		return fmt.Errorf("loadIntoTable %s: %w", toBucket, err)
 	}
-	//logger.Trace(fmt.Sprintf("[%s] ETL Load done", c.logPrefix), "bucket", bucket, "records", i)
+
+	// 批量处理剩余的数据
+	if len(batchKeys) > 0 {
+		if err := batchPut(db, batchKeys, batchValues, isDupSort, toBucket); err != nil {
+			return err
+		}
+	}
+	if len(batchDeletes) > 0 {
+		if err := batchDelete(db, batchDeletes, toBucket); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -292,17 +347,28 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 
 	h := &Heap{}
 	heapInit(h)
+
+	// 预取第一批数据
+	elements := make([]*HeapElem, 0, len(providers))
 	for i, provider := range providers {
 		if key, value, err := provider.Next(nil, nil); err == nil {
-			heapPush(h, &HeapElem{key, value, i})
-		} else /* we must have at least one entry per file */ {
-			eee := fmt.Errorf("%s: error reading first readers: n=%d current=%d provider=%s err=%w",
+			elements = append(elements, &HeapElem{key, value, i})
+		} else {
+			return fmt.Errorf("%s: error reading first readers: n=%d current=%d provider=%s err=%w",
 				logPrefix, len(providers), i, provider, err)
-			panic(eee)
 		}
 	}
 
+	// 批量插入 Heap
+	heapPushBatch(h, elements)
+
 	var prevK, prevV []byte
+	prevKSet := false
+
+	// **新增批量缓存**
+	batchSize := 1024
+	batchKeys := make([][]byte, 0, batchSize)
+	batchValues := make([][]byte, 0, batchSize)
 
 	// Main loading loop
 	for h.Len() > 0 {
@@ -313,49 +379,52 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 		element := heapPop(h)
 		provider := providers[element.TimeIdx]
 
-		// SortableOldestAppearedBuffer must guarantee that only 1 oldest value of key will appear
-		// but because size of buffer is limited - each flushed file does guarantee "oldest appeared"
-		// property, but files may overlap. files are sorted, just skip repeated keys here
-		if args.BufferType == SortableOldestAppearedBuffer {
+		switch args.BufferType {
+		case SortableOldestAppearedBuffer:
 			if !bytes.Equal(prevK, element.Key) {
-				if err = loadFunc(element.Key, element.Value); err != nil {
-					return err
-				}
-				// Need to copy k because the underlying space will be re-used for the next key
-				prevK = common.Copy(element.Key)
+				batchKeys = append(batchKeys, common.ReuseOrCopy(nil, element.Key))
+				batchValues = append(batchValues, common.ReuseOrCopy(nil, element.Value))
+				prevK = common.ReuseOrCopy(prevK, element.Key)
 			}
-		} else if args.BufferType == SortableAppendBuffer {
+		case SortableAppendBuffer:
 			if !bytes.Equal(prevK, element.Key) {
-				if prevK != nil {
-					if err = loadFunc(prevK, prevV); err != nil {
-						return err
-					}
+				if prevKSet {
+					batchKeys = append(batchKeys, common.ReuseOrCopy(nil, prevK))
+					batchValues = append(batchValues, common.ReuseOrCopy(nil, prevV))
 				}
-				// Need to copy k because the underlying space will be re-used for the next key
-				prevK = common.Copy(element.Key)
-				prevV = common.Copy(element.Value)
+				prevK = common.ReuseOrCopy(prevK, element.Key)
+				prevV = append(prevV[:0], element.Value...)
+				prevKSet = true
 			} else {
 				prevV = append(prevV, element.Value...)
 			}
-		} else if args.BufferType == SortableMergeBuffer {
+		case SortableMergeBuffer:
 			if !bytes.Equal(prevK, element.Key) {
-				if prevK != nil {
-					if err = loadFunc(prevK, prevV); err != nil {
-						return err
-					}
+				if prevKSet {
+					batchKeys = append(batchKeys, common.ReuseOrCopy(nil, prevK))
+					batchValues = append(batchValues, common.ReuseOrCopy(nil, prevV))
 				}
-				// Need to copy k because the underlying space will be re-used for the next key
-				prevK = common.Copy(element.Key)
-				prevV = common.Copy(element.Value)
+				prevK = common.ReuseOrCopy(prevK, element.Key)
+				prevV = common.ReuseOrCopy(prevV, element.Value)
+				prevKSet = true
 			} else {
 				prevV = buf.(*oldestMergedEntrySortableBuffer).merge(prevV, element.Value)
 			}
-		} else {
-			if err = loadFunc(element.Key, element.Value); err != nil {
-				return err
-			}
+		default:
+			batchKeys = append(batchKeys, common.ReuseOrCopy(nil, element.Key))
+			batchValues = append(batchValues, common.ReuseOrCopy(nil, element.Value))
 		}
 
+		// **批量写入 LoadFunc**
+		if len(batchKeys) >= batchSize {
+			if err = batchLoadFunc(batchKeys, batchValues, loadFunc); err != nil {
+				return err
+			}
+			batchKeys = batchKeys[:0] // 清空
+			batchValues = batchValues[:0]
+		}
+
+		// 预取下一个元素
 		if element.Key, element.Value, err = provider.Next(element.Key[:0], element.Value[:0]); err == nil {
 			heapPush(h, element)
 		} else if !errors.Is(err, io.EOF) {
@@ -363,15 +432,31 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 		}
 	}
 
-	if args.BufferType == SortableAppendBuffer {
-		if prevK != nil {
-			if err = loadFunc(prevK, prevV); err != nil {
-				return err
-			}
+	// 处理剩余未满 batchSize 的数据
+	if len(batchKeys) > 0 {
+		if err = batchLoadFunc(batchKeys, batchValues, loadFunc); err != nil {
+			return err
 		}
 	}
 
 	return nil
+}
+
+// batchLoadFunc 负责批量调用 LoadFunc
+func batchLoadFunc(keys [][]byte, values [][]byte, loadFunc simpleLoadFunc) error {
+	for i := 0; i < len(keys); i++ {
+		if err := loadFunc(keys[i], values[i]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// heapPushBatch 批量插入 heap，减少 heap 操作的开销
+func heapPushBatch(h *Heap, elements []*HeapElem) {
+	for _, elem := range elements {
+		heapPush(h, elem)
+	}
 }
 
 func makeCurrentKeyStr(k []byte) string {

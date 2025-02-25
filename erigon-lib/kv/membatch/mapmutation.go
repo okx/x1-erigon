@@ -5,13 +5,13 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/etl"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 	"unsafe"
 
-	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -252,34 +252,80 @@ func (m *Mapmutation) Delete(table string, k []byte) error {
 }
 
 func (m *Mapmutation) doCommit(tx kv.RwTx) error {
-	logEvery := time.NewTicker(30 * time.Second)
-	defer logEvery.Stop()
-	count := 0
-	total := float64(m.count)
+	startTime := time.Now()
+	keyCount := 0
+	total := m.count
+
+	// 批量限制
+	batchLimit := 1000
+	// 预分配批次内存池，减少内存分配
+	batchKeys := make([][]byte, 0, batchLimit)
+	batchValues := make([][]byte, 0, batchLimit)
+	collector := etl.NewCollector("", m.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize/2), m.logger)
+	defer collector.Close()
+
+	// 开启后台排序与刷新
+	collector.SortAndFlushInBackground(true)
+
 	for table, bucket := range m.puts {
-		collector := etl.NewCollector("", m.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize/2), m.logger)
-		defer collector.Close()
-		collector.SortAndFlushInBackground(true)
 		for key, value := range bucket {
-			if err := collector.Collect([]byte(key), value); err != nil {
-				return err
+			// 批量填充数据
+			batchKeys = append(batchKeys, []byte(key))
+			batchValues = append(batchValues, value)
+			keyCount++
+
+			// 达到批量限制时进行批量操作
+			if len(batchKeys) >= batchLimit {
+				if err := collectBatch(collector, batchKeys, batchValues); err != nil {
+					return err
+				}
+				// 清空内存池
+				batchKeys = batchKeys[:0]
+				batchValues = batchValues[:0]
 			}
-			count++
-			select {
-			default:
-			case <-logEvery.C:
-				progress := fmt.Sprintf("%.1fM/%.1fM", float64(count)/1_000_000, total/1_000_000)
+
+			// 每 30s 记录一次进度，减少日志记录的频率
+			if time.Since(startTime) > 30*time.Second {
+				progress := fmt.Sprintf("%.1fM/%.1fM", float64(keyCount)/1_000_000, total/1_000_000)
 				m.logger.Info("Write to db", "progress", progress, "current table", table)
 				tx.CollectMetrics()
+				startTime = time.Now()
 			}
 		}
+
+		// 处理剩余未满 batchLimit 的数据
+		if len(batchKeys) > 0 {
+			if err := collectBatch(collector, batchKeys, batchValues); err != nil {
+				return err
+			}
+		}
+
+		// 一次性执行 Load()，减少对 tx 的多次写入开销
 		if err := collector.Load(tx, table, etl.IdentityLoadFunc, etl.TransformArgs{Quit: m.quit}); err != nil {
 			return err
 		}
-		collector.Close()
+
+		// 清理数据
+		batchKeys = batchKeys[:0]
+		batchValues = batchValues[:0]
 	}
 
 	tx.CollectMetrics()
+	return nil
+}
+
+// collectBatch 负责批量收集
+func collectBatch(collector *etl.Collector, keys [][]byte, values [][]byte) error {
+	// 键值长度不匹配时返回错误
+	if len(keys) != len(values) {
+		return fmt.Errorf("keys and values length mismatch")
+	}
+	// 批量写入
+	for i := range keys {
+		if err := collector.Collect(keys[i], values[i]); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

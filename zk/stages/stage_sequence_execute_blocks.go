@@ -2,7 +2,10 @@ package stages
 
 import (
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/kv/membatch"
+	"github.com/ledgerwatch/log/v3"
 	"math/big"
+	"os"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -202,6 +205,7 @@ func finaliseBlock(
 
 	// For X Layer
 	metrics.GetLogStatistics().CumulativeTiming(metrics.ZkIncIntermediateHashesTiming, time.Since(zkIncStart))
+	log.Info("[FUCK] zkIncrementIntermediateHashes", "batch", batchState.batchNumber, "duration", time.Since(zkIncStart))
 
 	doFinStart := time.Now()
 	finalHeader := finalBlock.HeaderNoCopy()
@@ -211,51 +215,14 @@ func finaliseBlock(
 	finalHeader.Bloom = types.CreateBloom(builtBlockElements.receipts)
 	newNum := finalBlock.Number()
 
-	err = rawdb.WriteHeader_zkEvm(batchContext.sdb.tx, finalHeader)
-	if err != nil {
-		return nil, fmt.Errorf("failed to write header: %v", err)
-	}
-	if err := rawdb.WriteHeadHeaderHash(batchContext.sdb.tx, finalHeader.Hash()); err != nil {
+	if err = writeBlockTrace(batchContext, finalHeader, finalBlock, finalTransactions, finalReceipts); err != nil {
 		return nil, err
-	}
-	err = rawdb.WriteCanonicalHash(batchContext.sdb.tx, finalHeader.Hash(), newNum.Uint64())
-	if err != nil {
-		return nil, fmt.Errorf("failed to write header: %v", err)
-	}
-
-	erigonDB := erigon_db.NewErigonDb(batchContext.sdb.tx)
-	err = erigonDB.WriteBody(newNum, finalHeader.Hash(), finalTransactions)
-	if err != nil {
-		return nil, fmt.Errorf("failed to write body: %v", err)
-	}
-
-	// write the new block lookup entries
-	rawdb.WriteTxLookupEntries(batchContext.sdb.tx, finalBlock)
-
-	if err = rawdb.WriteReceipts(batchContext.sdb.tx, newNum.Uint64(), finalReceipts); err != nil {
-		return nil, err
-	}
-
-	if err = batchContext.sdb.hermezDb.WriteForkId(batchState.batchNumber, batchState.forkId); err != nil {
-		return nil, err
-	}
-
-	// now process the senders to avoid a stage by itself
-	if err := addSenders(*batchContext.cfg, newNum, finalTransactions, batchContext.sdb.tx, finalHeader); err != nil {
-		return nil, err
-	}
-
-	// now add in the zk batch to block references
-	if err := batchContext.sdb.hermezDb.WriteBlockBatch(newNum.Uint64(), batchState.batchNumber); err != nil {
-		return nil, fmt.Errorf("write block batch error: %v", err)
 	}
 
 	// For X Layer
 	metrics.GetLogStatistics().CumulativeTiming(metrics.FinaliseBlockWriteTiming, time.Since(doFinStart))
 
-	// write batch counters
-	err = batchContext.sdb.hermezDb.WriteBatchCounters(newNum.Uint64(), batchCounters.CombineCollectorsNoChanges().UsedAsArray())
-	if err != nil {
+	if err = handleHermezStorage(batchContext, batchState, batchCounters, newNum.Uint64()); err != nil {
 		return nil, err
 	}
 
@@ -274,6 +241,82 @@ func finaliseBlock(
 	}
 
 	return finalBlock, nil
+}
+
+func handleHermezStorage(
+	batchContext *BatchContext,
+	batchState *BatchState,
+	batchCounters *vm.BatchCounterCollector,
+	blockNumber uint64,
+) error {
+	if err := batchContext.sdb.hermezDb.WriteForkId(batchState.batchNumber, batchState.forkId); err != nil {
+		return err
+	}
+
+	// now add in the zk batch to block references
+	if err := batchContext.sdb.hermezDb.WriteBlockBatch(blockNumber, batchState.batchNumber); err != nil {
+		return fmt.Errorf("write block batch error: %v", err)
+	}
+
+	// write batch counters
+	err := batchContext.sdb.hermezDb.WriteBatchCounters(blockNumber, batchCounters.CombineCollectorsNoChanges().UsedAsArray())
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func writeBlockTrace(
+	batchContext *BatchContext,
+	finalHeader *types.Header,
+	finalBlock *types.Block,
+	finalTransactions types.Transactions,
+	finalReceipts types.Receipts,
+) error {
+	batch := membatch.NewHashBatch(batchContext.sdb.tx, batchContext.ctx.Done(), os.TempDir(), log.New())
+	defer batch.Close()
+
+	err := rawdb.WriteHeader_zkEvm(batch, finalHeader)
+	if err != nil {
+		return fmt.Errorf("failed to write header: %v", err)
+	}
+
+	if err := rawdb.WriteHeadHeaderHash(batch, finalHeader.Hash()); err != nil {
+		return err
+	}
+
+	err = rawdb.WriteCanonicalHash(batch, finalHeader.Hash(), finalBlock.NumberU64())
+	if err != nil {
+		return fmt.Errorf("failed to write header: %v", err)
+	}
+
+	erigonDB := erigon_db.NewErigonDb(batchContext.sdb.tx)
+	err = erigonDB.WriteBody(finalBlock.Number(), finalHeader.Hash(), finalTransactions)
+	if err != nil {
+		return fmt.Errorf("failed to write body: %v", err)
+	}
+
+	// write the new block lookup entries
+	rawdb.WriteTxLookupEntries(batch, finalBlock)
+
+	// will have format error when decode!!
+	if err = rawdb.WriteReceipts(batchContext.sdb.tx, finalBlock.NumberU64(), finalReceipts); err != nil {
+		return err
+	}
+
+	// now process the senders to avoid a stage by itself
+	if err := addSenders(*batchContext.cfg, finalBlock.Number(), finalTransactions, batch, finalHeader); err != nil {
+		return err
+	}
+
+	err = batch.Flush(batchContext.ctx, batchContext.sdb.tx)
+	if err != nil {
+		// m.tx.Rollback()
+		batch.Close()
+		return err
+	}
+
+	return nil
 }
 
 func postBlockStateHandling(
@@ -313,11 +356,11 @@ func addSenders(
 	cfg SequenceBlockCfg,
 	newNum *big.Int,
 	finalTransactions types.Transactions,
-	tx kv.RwTx,
+	tx kv.Putter,
 	finalHeader *types.Header,
 ) error {
 	signer := types.MakeSigner(cfg.chainConfig, newNum.Uint64(), 0)
-	cryptoContext := secp256k1.ContextForThread(1)
+	cryptoContext := secp256k1.ContextForThread(0)
 	senders := make([]common.Address, 0, len(finalTransactions))
 	for _, transaction := range finalTransactions {
 		from, ok := transaction.GetSender()
