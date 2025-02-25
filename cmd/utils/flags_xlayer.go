@@ -204,6 +204,31 @@ var (
 		Usage: "Method rate limit in requests per second, format: {\"method\":[\"method1\",\"method2\"],\"count\":1,\"bucket\":1}, eg. {\"methods\":[\"eth_call\",\"eth_blockNumber\"],\"count\":10,\"bucket\":1}",
 		Value: "",
 	}
+	PreRunAddressList = cli.StringFlag{
+		Name:  "zkevm.pre-run-address-list",
+		Usage: "Pre run address list while receiving a transaction",
+		Value: "",
+	}
+	PreRunCacheSize = cli.IntFlag{
+		Name:  "zkevm.pre-run-cache-size",
+		Usage: "Size of pre-run cache",
+		Value: 10000,
+	}
+	PreRunCacheTTL = cli.DurationFlag{
+		Name:  "zkevm.pre-run-cache-ttl",
+		Usage: "pre-run cache entry TTL",
+		Value: time.Hour,
+	}
+	PreRunChanNum = cli.IntFlag{
+		Name:  "zkevm.pre-run-chan-num",
+		Usage: "pre-run chan num",
+		Value: 10000,
+	}
+	PreRunTaskNum = cli.IntFlag{
+		Name:  "zkevm.pre-run-task-num",
+		Usage: "pre-run task num",
+		Value: 8,
+	}
 )
 
 func setGPOXLayer(ctx *cli.Context, cfg *gaspricecfg.Config) {
@@ -329,6 +354,21 @@ func setTxPoolXLayer(ctx *cli.Context, cfg *ethconfig.DeprecatedTxPoolConfig) {
 	}
 }
 
+func SetPreRunList(ctx *cli.Context, cfg *ethconfig.Config) {
+	if ctx.IsSet(PreRunAddressList.Name) {
+		addrHexes := libcommon.CliString2Array(ctx.String(PreRunAddressList.Name))
+
+		cfg.XLayer.PreRunList = make(map[libcommon.Address]struct{}, len(addrHexes))
+		for _, addr := range addrHexes {
+			cfg.XLayer.PreRunList[libcommon.HexToAddress(addr)] = struct{}{}
+		}
+		cfg.XLayer.PreRunCacheSize = ctx.Int(PreRunCacheSize.Name)
+		cfg.XLayer.PreRunCacheTTL = ctx.Duration(PreRunCacheTTL.Name)
+		cfg.XLayer.PreRunChanNum = ctx.Int(PreRunChanNum.Name)
+		cfg.XLayer.PreRunTaskNum = ctx.Int(PreRunTaskNum.Name)
+	}
+}
+
 // SetApolloGPOXLayer is a public wrapper function to internally call setGPO
 func SetApolloGPOXLayer(ctx *cli.Context, cfg *gaspricecfg.Config) {
 	setGPO(ctx, cfg)
@@ -337,4 +377,12 @@ func SetApolloGPOXLayer(ctx *cli.Context, cfg *gaspricecfg.Config) {
 // SetApolloPoolXLayer is a public wrapper function to internally call setTxPool
 func SetApolloPoolXLayer(ctx *cli.Context, fullCfg *ethconfig.Config) {
 	setTxPool(ctx, fullCfg)
+}
+
+func CheckAddressExists(addressMap map[libcommon.Address]struct{}, target *libcommon.Address) bool {
+	if target == nil {
+		return false
+	}
+	_, exists := addressMap[*target]
+	return exists
 }

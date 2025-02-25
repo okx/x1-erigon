@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/zk/sequencer"
 
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -383,8 +384,10 @@ type APIImpl struct {
 	LogsMaxRange                  uint64
 
 	// For X Layer
-	L2GasPricer   gasprice.L2GasPricer
-	EnableInnerTx bool
+	L2GasPricer     gasprice.L2GasPricer
+	EnableInnerTx   bool
+	PreRunList      map[common.Address]struct{}
+	preRunProcessor *PreRunProcessor
 }
 
 // NewEthAPI returns APIImpl instance
@@ -424,14 +427,22 @@ func NewEthAPI(base *BaseAPI, db kv.RoDB, eth rpchelper.ApiBackend, txPool txpoo
 		// For X Layer
 		L2GasPricer:   gasprice.NewL2GasPriceSuggester(context.Background(), ethCfg.GPO),
 		EnableInnerTx: ethCfg.XLayer.EnableInnerTx,
+		PreRunList:    ethCfg.XLayer.PreRunList,
 	}
 
 	// For X Layer
-	// Only Sequencer requires to calculate dynamic gas price periodically
-	// eth_gasPrice requests for the RPC nodes are all redirected to the Sequencer node (via zkevm.l2-sequencer-rpc-url)
-	GasPricerOnce.Do(func() {
+	XLayerOnce.Do(func() {
 		if sequencer.IsSequencer() {
+			log.Info("X Layer once for sequencer")
+			// Only Sequencer requires to calculate dynamic gas price periodically
+			// eth_gasPrice requests for the RPC nodes are all redirected to the Sequencer node (via zkevm.l2-sequencer-rpc-url)
 			apii.runL2GasPricerForXLayer()
+			// Initialize the precompiled cache and prerun workers
+			vm.InitPrecompiledCache(ethCfg.XLayer.PreRunCacheSize, ethCfg.XLayer.PreRunCacheTTL)
+			apii.initPreRunWorkers(ethCfg.XLayer.PreRunChanNum, ethCfg.XLayer.PreRunTaskNum)
+			log.Info(fmt.Sprintf("XLayer pre run list:%v, cache size:%v, ttl:%v, chan:%v, task:%v",
+				apii.PreRunList, ethCfg.XLayer.PreRunCacheSize, ethCfg.XLayer.PreRunCacheTTL,
+				ethCfg.XLayer.PreRunChanNum, ethCfg.XLayer.PreRunTaskNum))
 		}
 	})
 

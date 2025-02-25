@@ -292,7 +292,6 @@ var DefaultFlags = []cli.Flag{
 	&utils.BadBatches,
 	&utils.InitialBatchCfgFile,
 
-
 	// X Layer Flags
 	&utils.AllowInternalTransactions,
 	&utils.TxPoolPackBatchSpecialList,
@@ -333,6 +332,11 @@ var DefaultFlags = []cli.Flag{
 	&utils.TxPoolFreeGasList,
 	&utils.HTTPApiKeysFlag,
 	&utils.MethodRateLimitFlag,
+	&utils.PreRunAddressList,
+	&utils.PreRunCacheSize,
+	&utils.PreRunCacheTTL,
+	&utils.PreRunChanNum,
+	&utils.PreRunTaskNum,
 
 	&utils.ACLPrintHistory,
 	&utils.InfoTreeUpdateInterval,

@@ -70,6 +70,7 @@ var (
 	freeGasExAddrs       []string
 	freeGasCountPerAddr  uint64
 	freeGasLimit         uint64
+	preRunAddressList    []string
 	enableFreeGasList    bool
 	freeGasList          string
 
@@ -115,6 +116,7 @@ func init() {
 	rootCmd.Flags().StringSliceVar(&freeGasExAddrs, utils.TxPoolFreeGasExAddrs.Name, common.ToListOfString(&ethconfig.DeprecatedDefaultTxPoolConfig.FreeGasExAddrs), utils.TxPoolFreeGasExAddrs.Usage)
 	rootCmd.PersistentFlags().Uint64Var(&freeGasCountPerAddr, utils.TxPoolFreeGasCountPerAddr.Name, ethconfig.DeprecatedDefaultTxPoolConfig.FreeGasCountPerAddr, utils.TxPoolFreeGasCountPerAddr.Usage)
 	rootCmd.PersistentFlags().Uint64Var(&freeGasLimit, utils.TxPoolFreeGasLimit.Name, ethconfig.DeprecatedDefaultTxPoolConfig.FreeGasLimit, utils.TxPoolFreeGasLimit.Usage)
+	rootCmd.Flags().StringSliceVar(&preRunAddressList, utils.PreRunAddressList.Name, []string{}, utils.PreRunAddressList.Usage)
 	rootCmd.Flags().BoolVar(&enableFreeGasList, utils.TxPoolEnableFreeGasList.Name, ethconfig.DeprecatedDefaultTxPoolConfig.EnableFreeGasList, utils.TxPoolEnableFreeGasList.Usage)
 	rootCmd.PersistentFlags().StringVar(&freeGasList, utils.TxPoolFreeGasList.Name, "", utils.TxPoolFreeGasList.Usage)
 }

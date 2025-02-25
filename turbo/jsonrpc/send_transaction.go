@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	txPoolProto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 
+	utils2 "github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -103,6 +104,9 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutility
 		if chainId.Cmp(txnChainId.ToBig()) != 0 {
 			return common.Hash{}, fmt.Errorf("invalid chain id, expected: %d got: %d", chainId, *txnChainId)
 		}
+	}
+	if len(api.PreRunList) > 0 && utils2.CheckAddressExists(api.PreRunList, txn.GetTo()) {
+		api.preRun(txn, chainId)
 	}
 
 	hash := txn.Hash()

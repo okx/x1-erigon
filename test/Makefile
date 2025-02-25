@@ -127,13 +127,15 @@ stop: ## Stops all services
 
 .PHONY: min-run
 min-run: build-docker ## Runs a minimal node
+	$(RUN_DOCKER_POOL_DB)
 	$(RUN_DOCKER_L1_NETWORK)
-	$(RUN_DOCKER_STATELESS_EXECUTOR)
+	#$(RUN_DOCKER_STATELESS_EXECUTOR)
 	sleep 10
 	$(RUN_DOCKER_SEQ)
 	sleep 10
 	$(RUN_DOCKER_DS)
-	sleep 10
+	sleep 5
+	$(RUN_DOCKER_POOL_MANAGER)
 	$(RUN_DOCKER_RPC)
 
 .PHONY: test
