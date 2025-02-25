@@ -199,28 +199,13 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 	// For X Layer tx pool access
 	ethCfg := &ethconfig.Defaults
 	ethCfg.DeprecatedTxPool.EnableWhitelist = enableWhiteList
-	ethCfg.DeprecatedTxPool.WhiteList = *common.NewOrderedListOfAddresses(len(whiteList))
-	for _, addrHex := range whiteList {
-		ethCfg.DeprecatedTxPool.WhiteList.Add(common.HexToAddress(addrHex))
-	}
-	ethCfg.DeprecatedTxPool.WhiteList.Sort()
-	ethCfg.DeprecatedTxPool.BlockedList = *common.NewOrderedListOfAddresses(len(blockList))
-	for _, addrHex := range blockList {
-		ethCfg.DeprecatedTxPool.BlockedList.Add(common.HexToAddress(addrHex))
-	}
-	ethCfg.DeprecatedTxPool.BlockedList.Sort()
-	ethCfg.DeprecatedTxPool.FreeClaimGasAddrs = *common.NewOrderedListOfAddresses(len(freeClaimGasAddrs))
-	for _, addrHex := range freeClaimGasAddrs {
-		ethCfg.DeprecatedTxPool.FreeClaimGasAddrs.Add(common.HexToAddress(addrHex))
-	}
-	ethCfg.DeprecatedTxPool.FreeClaimGasAddrs.Sort()
+
+	ethCfg.DeprecatedTxPool.WhiteList = *common.NewOrderedListOfAddressesFromStrings(whiteList)
+	ethCfg.DeprecatedTxPool.BlockedList = *common.NewOrderedListOfAddressesFromStrings(blockList)
+	ethCfg.DeprecatedTxPool.FreeClaimGasAddrs = *common.NewOrderedListOfAddressesFromStrings(freeClaimGasAddrs)
 	ethCfg.DeprecatedTxPool.GasPriceMultiple = gasPriceMultiple
 	ethCfg.DeprecatedTxPool.EnableFreeGasByNonce = enableFreeGasByNonce
-	ethCfg.DeprecatedTxPool.FreeGasExAddrs = *common.NewOrderedListOfAddresses(len(freeGasExAddrs))
-	for _, addrHex := range freeGasExAddrs {
-		ethCfg.DeprecatedTxPool.FreeGasExAddrs.Add(common.HexToAddress(addrHex))
-	}
-	ethCfg.DeprecatedTxPool.FreeGasExAddrs.Sort()
+	ethCfg.DeprecatedTxPool.FreeGasExAddrs = *common.NewOrderedListOfAddressesFromStrings(freeGasExAddrs)
 	ethCfg.DeprecatedTxPool.FreeGasCountPerAddr = freeGasCountPerAddr
 	ethCfg.DeprecatedTxPool.FreeGasLimit = freeGasLimit
 	ethCfg.DeprecatedTxPool.EnableFreeGasList = enableFreeGasList

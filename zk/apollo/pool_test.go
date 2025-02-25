@@ -22,6 +22,10 @@ func initAddresses() {
 	isTestAddressesInit = true
 }
 
+func convertStringToAddress(s string) common.Address {
+	return common.HexToAddress(s)
+}
+
 func BenchmarkContainsAddressNew(b *testing.B) {
 	initAddresses()
 	localAddrs := common.NewOrderedListOfAddresses(len(testAddresses))
@@ -56,6 +60,33 @@ func TestContainsAddressBinarySearch(t *testing.T) {
 	addr = common.BytesToAddress(b)
 	if localAddrs.Contains(addr) {
 		t.Errorf("Expected not to be found")
+	}
+}
+
+func TestAddMultipleItemsAndSort(t *testing.T) {
+	initAddresses()
+	localAddrs := common.NewOrderedListOfAddresses(len(testAddresses))
+	for _, item := range testAddresses {
+		localAddrs.Add(item)
+	}
+	localAddrs.Sort()
+	items := localAddrs.Items()
+	for i := 0; i < len(items)-1; i++ {
+		if common.CompareAddressess(items[i], items[i+1]) > 0 {
+			t.Errorf("Expected to be sorted")
+		}
+	}
+	testAddrStrs := make([]string, len(testAddresses))
+	for i, item := range testAddresses {
+		testAddrStrs[i] = item.String()
+	}
+	localAddrs = common.NewOrderedListOfAddresses(len(testAddresses))
+	common.AddItemsAndSort(localAddrs, testAddrStrs, convertStringToAddress)
+	items = localAddrs.Items()
+	for i := 0; i < len(items)-1; i++ {
+		if common.CompareAddressess(items[i], items[i+1]) > 0 {
+			t.Errorf("Expected to be sorted")
+		}
 	}
 }
 
