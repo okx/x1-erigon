@@ -1,13 +1,13 @@
 # global & shell env variables
-USER_PREFIX = $(shell awk '/^user:/ {print $$2}' lrp.config.yaml 2>/dev/null || true)
+USER_PREFIX = $(shell awk '/^user:/ {print $$2}' lrp.config.yaml 2>/dev/null)
 IMAGE_TAG = $(USER_PREFIX)-$(shell git rev-parse --short HEAD)
 export USER_PREFIX IMAGE_TAG
-PORT_DIFF = $(shell awk '/^portDiff:/ {print $$2}' lrp.config.yaml 2>/dev/null || true)
-PPROF_PORT = $(shell echo $$((6060 + $(PORT_DIFF))) 2>/dev/null || true)
-RPC_PORT = $(shell echo $$((8545 + $(PORT_DIFF))) 2>/dev/null || true)
-DS_PORT = $(shell echo $$((6900 + $(PORT_DIFF))) 2>/dev/null || true)
-METRICS_PORT = $(shell echo $$((9095 + $(PORT_DIFF))) 2>/dev/null || true)
-EXTERNAL_DS_PORT = $(shell echo $$((16900 + $(PORT_DIFF))) 2>/dev/null || true)
+PORT_DIFF = $(shell awk '/^portDiff:/ {print $$2}' lrp.config.yaml 2>/dev/null | grep -E '^[0-9]+$$|^-[0-9]+$$' || echo 0)
+PPROF_PORT = $(shell echo $$((6060 + $(PORT_DIFF))))
+RPC_PORT = $(shell echo $$((8545 + $(PORT_DIFF))))
+DS_PORT = $(shell echo $$((6900 + $(PORT_DIFF))))
+METRICS_PORT = $(shell echo $$((9095 + $(PORT_DIFF))))
+EXTERNAL_DS_PORT = $(shell echo $$((16900 + $(PORT_DIFF))))
 export PPROF_PORT RPC_PORT DS_PORT METRICS_PORT EXTERNAL_DS_PORT
 
 DOCKER_COMPOSE := docker compose -f docker-compose.yml -p $(USER_PREFIX)-xlayer-lrp
