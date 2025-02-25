@@ -1,8 +1,8 @@
-user: kyrin
-gitCommit: e4fddbfa0c
-portDiff: 3
-fromBatchNumber: 134485
-toBatchNumber: 134500
-useExternalDatastream: true
+user: 
+gitCommit: 
+portDiff: 
+fromBatchNumber: 
+toBatchNumber: 
+useExternalDatastream: 
 externalDatastreamPath: ./external_ds/data-stream
 srcMainnetDataPath: $HOME/Downloads/mainnet/seq
