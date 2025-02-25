@@ -9,7 +9,7 @@ services:
       - CDK_ERIGON_SEQUENCER=0
     volumes:
       - ./mainnet/seq/:/home/erigon/data/
-      - ./config/xlayerconfig-mainnet.yaml:/usr/src/app/config.yaml
+      - ./xlayerconfig-mainnet.yaml:/usr/src/app/config.yaml
     command: |
       integration state_stages_zkevm \
         --config=/usr/src/app/config.yaml \
@@ -29,7 +29,7 @@ services:
       - ${METRICS_PORT}:9095
     volumes:
       - ./mainnet/seq:/home/erigon/data/
-      - ./config/xlayerconfig-mainnet.yaml:/usr/src/app/config.yaml
+      - ./xlayerconfig-mainnet.yaml:/usr/src/app/config.yaml
     profiles:
       - internal-ds
     command: >
@@ -59,6 +59,6 @@ services:
       - 0.0.0.0:50061:50061 # MT
       - 0.0.0.0:50071:50071 # Executor
     volumes:
-      - ./config/test.stateless_executor.config.json:/usr/src/app/config.json
+      - ../config/test.stateless_executor.config.json:/usr/src/app/config.json
     command: >
       zkProver -c /usr/src/app/config.json
