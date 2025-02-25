@@ -215,6 +215,9 @@ var DefaultFlags = []cli.Flag{
 	&utils.SequencerResequence,
 	&utils.SequencerResequenceStrict,
 	&utils.SequencerResequenceReuseL1InfoIndex,
+	&utils.SequencerReplay,
+	&utils.SequencerReplayHaltOnBatchNumber,
+	&utils.SequencerReplayExternalDatastream,
 	&utils.ExecutorUrls,
 	&utils.ExecutorStrictMode,
 	&utils.ExecutorRequestTimeout,
@@ -291,7 +294,6 @@ var DefaultFlags = []cli.Flag{
 	&utils.VirtualCountersSmtReduction,
 	&utils.BadBatches,
 	&utils.InitialBatchCfgFile,
-
 
 	// X Layer Flags
 	&utils.AllowInternalTransactions,

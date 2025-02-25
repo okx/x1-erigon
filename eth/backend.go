@@ -1934,6 +1934,15 @@ func (s *Ethereum) Start() error {
 // Stop implements node.Service, terminating all internal goroutines used by the
 // Ethereum protocol.
 func (s *Ethereum) Stop() error {
+	// Wait for the batch resequence done
+	if s.config.Zk.SequencerResequence && s.config.Zk.SequencerReplay && s.config.Zk.SequencerReplayExternalDatastream {
+		if done, running := zkStages.WaitResequenceBatchDone(); running {
+			s.logger.Info("Waiting for resequencing latest batch...")
+			<-done
+			s.logger.Info("Resequence latest batch finished")
+		}
+	}
+
 	// Stop all the peer-related stuff first.
 	s.sentryCancel()
 	if s.unsubscribeEthstat != nil {

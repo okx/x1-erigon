@@ -10,6 +10,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
 
+	"github.com/0xPolygonHermez/zkevm-data-streamer/datastreamer"
+	dslog "github.com/0xPolygonHermez/zkevm-data-streamer/log"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -17,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/zk"
+	"github.com/ledgerwatch/erigon/zk/datastream/server"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	"github.com/ledgerwatch/erigon/zk/metrics"
 	zktx "github.com/ledgerwatch/erigon/zk/tx"
@@ -24,6 +27,7 @@ import (
 )
 
 var shouldCheckForExecutionAndDataStreamAlignment = true
+var externalDataStreamServerCreated = false
 
 func SpawnSequencingStage(
 	s *stagedsync.StageState,
@@ -44,7 +48,28 @@ func SpawnSequencingStage(
 		return err
 	}
 
-	highestBatchInDs, err := cfg.dataStreamServer.GetHighestBatchNumber()
+	var highestBatchInDs uint64
+	if cfg.zk.SequencerResequence && cfg.zk.SequencerReplay {
+		var externalDataStreamServer server.DataStreamServer
+		if cfg.zk.SequencerReplayExternalDatastream && !externalDataStreamServerCreated {
+			externalDataStreamServer, err = createExternalDataStreamServer(cfg)
+			if err != nil {
+				return err
+			}
+			externalDataStreamServerCreated = true
+			highestBatchInDs, err = externalDataStreamServer.GetHighestBatchNumber()
+		} else {
+			highestBatchInDs, err = cfg.dataStreamServer.GetHighestBatchNumber()
+		}
+		if err != nil {
+			return err
+		}
+		if lastBatch < highestBatchInDs {
+			return replay(s, u, ctx, cfg, historyCfg, lastBatch, highestBatchInDs, externalDataStreamServer)
+		}
+	}
+
+	highestBatchInDs, err = cfg.dataStreamServer.GetHighestBatchNumber()
 	if err != nil {
 		return err
 	}
@@ -339,6 +364,7 @@ func sequencingBatchStep(
 
 		innerBreak := false
 		emptyBlockOverflow := false
+		stateRootBeforeResequence := common.Hash{}
 		sendersToTriggerStatechanges := make(map[common.Address]struct{})
 		processingTxTime := time.Now()
 	OuterLoopTransactions:
@@ -396,6 +422,7 @@ func sequencingBatchStep(
 				if err != nil {
 					return err
 				}
+				stateRootBeforeResequence = batchState.resequenceBatchJob.CurrentBlock().StateRoot
 			} else if !batchState.isL1Recovery() {
 
 				var allConditionsOK bool
@@ -756,6 +783,19 @@ func sequencingBatchStep(
 		}
 		cfg.legacyVerifier.StartAsyncVerification(batchContext.s.LogPrefix(), batchState.forkId, batchState.batchNumber, block.Root(), counters.UsedAsMap(), batchState.builtBlocks, useExecutorForVerification, batchContext.cfg.zk.SequencerBatchVerificationTimeout, batchContext.cfg.zk.SequencerBatchVerificationRetries)
 
+		if batchState.isResequence() {
+			if stateRootBeforeResequence != block.Root() {
+				err := fmt.Errorf("[%s] State root mismatch of block %d after resequencing, expected %s, got %s",
+					logPrefix,
+					blockNumber,
+					stateRootBeforeResequence.Hex(),
+					block.Root().Hex(),
+				)
+				log.Error(err.Error())
+				return err
+			}
+		}
+
 		// check for new responses from the verifier
 		needsUnwind, err := updateStreamAndCheckRollback(batchContext, batchState, streamWriter, u)
 
@@ -825,4 +865,42 @@ func handleBadTxHashCounter(hermezDb *hermez_db.HermezDb, txHash common.Hash) (u
 	newCounter := counter + 1
 	hermezDb.WriteBadTxHashCounter(txHash, newCounter)
 	return newCounter, nil
+}
+
+func createExternalDataStreamServer(cfg SequenceBlockCfg) (server.DataStreamServer, error) {
+	// Use hardcoded timeout values & port & datastream file
+	writeTimeout := 20 * time.Second
+	inactivityTimeout := 10 * time.Minute
+	inactivityCheckInterval := 5 * time.Minute
+	port := uint16(16900)
+	datastreamFile := "/home/data-stream"
+
+	logConfig := &dslog.Config{
+		Environment: "production",
+		Level:       "warn",
+		Outputs:     nil,
+	}
+
+	factory := server.NewZkEVMDataStreamServerFactory()
+
+	streamServer, err := factory.CreateStreamServer(
+		port,
+		uint8(cfg.zk.DatastreamVersion),
+		1,
+		datastreamer.StreamType(1),
+		datastreamFile,
+		writeTimeout,
+		inactivityTimeout,
+		inactivityCheckInterval,
+		logConfig,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create stream server: %v", err)
+	}
+
+	fmt.Printf("Successfully created external data stream server with file: %s\n", datastreamFile)
+
+	dataStreamServer := factory.CreateDataStreamServer(streamServer, cfg.zk.L2ChainId)
+
+	return dataStreamServer, nil
 }
