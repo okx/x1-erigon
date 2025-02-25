@@ -427,9 +427,11 @@ func zkIncrementIntermediateHashes(ctx context.Context, logPrefix string, s *sta
 		}
 	}
 
+	t1 := time.Now()
 	if _, _, err := dbSmt.SetStorage(ctx, logPrefix, accChanges, codeChanges, storageChanges); err != nil {
 		return trie.EmptyRoot, err
 	}
+	log.Info("[FUCK] dbSmt.SetStorage", "duration", time.Since(t1))
 
 	log.Info(fmt.Sprintf("[%s] Regeneration trie hashes finished. Commiting batch", logPrefix))
 
