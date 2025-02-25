@@ -24,7 +24,7 @@ RUN_DOCKER_MAINNET_REPLAY_WITH_EXTERNAL_DATASTREAM := $(DOCKER_COMPOSE) --profil
 
 UNWIND_LOG_FILE := unwind.log
 REPLAY_LOG_FILE := replay.log
-REPLAY_FILTERED_LOG_FILE := replay_filtered.log
+REPLAY_TPS_FILE := tps.log
 
 .PHONY: lrp-build-docker
 lrp-build-docker: # Build cdk-erigoin for lrp
@@ -212,8 +212,7 @@ lrp-mainnet-data-compact:
 .PHONY: lrp-mainnet-tps
 lrp-mainnet-tps: # Filter logs for LRP & Compute TPS
 	@docker logs $(DOCKER_MAINNET_REPLAY_CONTAINER) > $(REPLAY_LOG_FILE) 2>&1; \
-	docker logs $(DOCKER_MAINNET_REPLAY_CONTAINER) 2>&1 | grep "\[5/13 Execution\]" > $(REPLAY_FILTERED_LOG_FILE); \
-	python process_log.py $(REPLAY_FILTERED_LOG_FILE)
+	python process_log.py $(REPLAY_LOG_FILE) 2>&1 | tee $(REPLAY_TPS_FILE)
 
 .PHONY: lrp-stop
 lrp-stop:

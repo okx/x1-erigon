@@ -3,7 +3,7 @@ import argparse
 import logging
 from datetime import datetime
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format='%(message)s')
 
 def parse_time(line):
     match = re.search(r'\[(\d{2}-\d{2}\|\d{2}:\d{2}:\d{2}\.\d{3})\]', line)
@@ -15,7 +15,6 @@ def parse_time(line):
 
 def main(log_file):
     last_batch = None
-    highest_batch_in_data_stream = None
     start_time = None
     end_time = None
     tx_count = 0
@@ -27,12 +26,21 @@ def main(log_file):
             logging.error("Log file does not contain enough lines.")
             return
 
-        last_batch = int(re.search(r'Last batch (\d+)', lines[0]).group(1))
-        # highest_batch_in_data_stream = int(re.search(r'highest batch in datastream (\d+)', lines[0]).group(1))
-        halt_batch = int(re.search(r'resequencing from batch \d+ to (\d+)', lines[0]).group(1))
+        first_line = None
+        for i, line in enumerate(lines):
+            if "[5/13 Execution] Last batch" in line:
+                first_line = line
+                break
 
-        first_line_time = parse_time(lines[0])
-        second_line_time = parse_time(lines[1])
+        if not first_line:
+            logging.error("Last batch line not found.")
+            return
+
+        last_batch = int(re.search(r'Last batch (\d+)', first_line).group(1))
+        halt_batch = int(re.search(r'resequencing from batch \d+ to (\d+)', first_line).group(1))
+
+        first_line_time = parse_time(first_line)
+        second_line_time = parse_time(lines[i+1])
         startup_duration = (second_line_time - first_line_time).total_seconds()
 
         for i, line in enumerate(lines):
@@ -44,12 +52,23 @@ def main(log_file):
             logging.error("Start time not found.")
             return
 
+        total_tx_count = 0
         for line in lines[i:]:
-            if "Finish block" in line:
-                match = re.search(r'Finish block \d+ with (\d+) transactions', line)
-                if match:
-                    tx_count += int(match.group(1))
-            if "Resequencing completed." in line or "[EROR]" in line:
+            if "Batch" in line and "TotalDuration" in line and "Tx" in line:
+                batch_match = re.search(r'Batch<(\d+)>', line)
+                duration_match = re.search(r'TotalDuration<(\d+)ms>', line)
+                tx_match = re.search(r'Tx<(\d+)>', line)
+                
+                if batch_match and duration_match and tx_match:
+                    batch_no = int(batch_match.group(1))
+                    duration_ms = int(duration_match.group(1))
+                    tx_count = int(tx_match.group(1))
+                    total_tx_count += tx_count
+                    
+                    instant_tps = (tx_count * 1000) / duration_ms if duration_ms > 0 else 0
+                    logging.info(f"Batch {batch_no}: {tx_count} txs in {duration_ms/1000:.3f} seconds, Instant TPS: {instant_tps:.2f}")
+            
+            if "Resequencing completed." in line:
                 end_time = parse_time(line)
                 break
 
@@ -58,16 +77,17 @@ def main(log_file):
             return
 
         duration = (end_time - start_time).total_seconds()
-        tps = tx_count / duration if duration > 0 else 0
+        avg_tps = total_tx_count / duration if duration > 0 else 0
 
+        logging.info("")
         logging.info(f"{'From Batch:':<25} {last_batch+1}")
         logging.info(f"{'To Batch:':<25} {halt_batch}")
         logging.info(f"{'Data Stream Startup:':<25} {startup_duration} seconds")
         logging.info(f"{'Start Time:':<25} {start_time}")
         logging.info(f"{'End Time:':<25} {end_time}")
-        logging.info(f"{'Total Transactions:':<25} {tx_count}")
-        logging.info(f"{'Re-sequencing Duration:':<25} {duration} seconds")
-        logging.info(f"{'TPS:':<25} {tps}")
+        logging.info(f"{'Total Transactions:':<25} {total_tx_count}")
+        logging.info(f"{'Replay Duration:':<25} {duration} seconds")
+        logging.info(f"{'Average TPS:':<25} {avg_tps}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Process log file to calculate TPS.')
