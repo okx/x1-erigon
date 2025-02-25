@@ -84,10 +84,10 @@ func runTestHashContractBytecodeConsistencyOdd(size int, t *testing.T) {
 func TestHashContractBytecodeConsistency(t *testing.T) {
 	runTestHashContractBytecodeConsistencyEven(1234, t)
 	runTestHashContractBytecodeConsistencyEven(37, t)
-	runTestHashContractBytecodeConsistencyEven(111, t) // edge case, divisible by 56*2
+	runTestHashContractBytecodeConsistencyEven(111, t) // edge case, the actual size is divisible by 56*2
 	runTestHashContractBytecodeConsistencyOdd(37, t)
 	runTestHashContractBytecodeConsistencyOdd(1, t)
-	runTestHashContractBytecodeConsistencyOdd(111, t) // edge case, the actual size divisible by 56*2
+	runTestHashContractBytecodeConsistencyOdd(111, t) // edge case, the actual size is divisible by 56*2
 }
 
 func TestConvertBigIntToHex(t *testing.T) {
